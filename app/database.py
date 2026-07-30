@@ -11,7 +11,7 @@ VERITABANI_URL = "sqlite+aiosqlite:///./personalwiki.db"
 # yazdirir - ilk gelistirme asamasinda hata ayiklamak icin cok faydali,
 # kapatabiliriz (echo=False)
 
-engine = create_async_engine(VERITABANI_URL, echo=True)
+engine = create_async_engine(VERITABANI_URL, echo=False)
 
 # async_sessionmaker: her istek geldiginde YENI bir "oturum" (session)
 # uretmemizi saglayan bir fabrika. expire_on_commit=False demek: commit
