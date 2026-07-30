@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>PersonalWiki - Kavram Grafigi Goruntuleyici</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        #graf { width: 100%; height: 600px; border: 1px solid #ccc; margin-top: 10px; }
+        input, button, select { padding: 8px; font-size: 14px; }
+        button { cursor: pointer; }
+        #hata_mesaji { color: red; margin-top: 10px; }
+        #sayfa_id_alani { display: inline; }
+    </style>
+</head>
+<body>
+    <h2>Kavram Grafigi Goruntuleyici</h2>
+
+    <label for="mod_secici">Gorunum:</label>
+    <select id="mod_secici" onchange="modDegisti()">
+        <option value="sayfa">Katman 1: Sayfa Ici</option>
+        <option value="global">Katman 2: Global (Sayfalar Arasi)</option>
+    </select>
+
+    <span id="sayfa_id_alani">
+        <label for="sayfa_id_girdisi">Sayfa ID:</label>
+        <input type="number" id="sayfa_id_girdisi" value="1" min="1">
+    </span>
+
+    <button onclick="grafiGetir()">Getir</button>
+
+    <div id="hata_mesaji"></div>
+    <div id="graf"></div>
+    <div id="secili_dugum_bilgisi" style="margin-top: 10px; padding: 10px; background: #f5f5f5; min-height: 20px;"></div>
+
+    <script>
+        function modDegisti() {
+            const mod = document.getElementById("mod_secici").value;
+            const sayfaIdAlani = document.getElementById("sayfa_id_alani");
+            sayfaIdAlani.style.display = (mod === "global") ? "none" : "inline";
+        }
+
+        async function grafiGetir() {
+            const hataDiv = document.getElementById("hata_mesaji");
+            hataDiv.textContent = "";
+
+            const mod = document.getElementById("mod_secici").value;
+            let url;
+
+            if (mod === "sayfa") {
+                const sayfaId = document.getElementById("sayfa_id_girdisi").value;
+                if (!sayfaId) {
+                    hataDiv.textContent = "Lutfen bir sayfa ID'si gir.";
+                    return;
+                }
+                url = `/pages/${sayfaId}/graph`;
+            } else {
+                url = `/graph/global`;
+            }
+
+            let cevap;
+            try {
+                cevap = await fetch(url);
+            } catch (hata) {
+                hataDiv.textContent = "Sunucuya baglanilamadi: " + hata.message;
+                return;
+            }
+
+            if (!cevap.ok) {
+                hataDiv.textContent = `Hata: ${cevap.status} - veri bulunamadi.`;
+                return;
+            }
+
+            const veri = await cevap.json();
+
+            if (mod === "sayfa") {
+                grafiCizSayfaModu(veri);
+            } else {
+                grafiCizGlobalModu(veri);
+            }
+        }
+
+        function grafiCizSayfaModu(veri) {
+            const dugumler = veri.kavramlar.map(function(kavram) {
+                return {
+                    id: kavram.id,
+                    label: kavram.standart_isim,
+                    group: kavram.tip,
+                    title: "Tur: " + kavram.tip
+                };
+            });
+
+            const kenarlar = veri.iliskiler.map(function(iliski) {
+                return {
+                    from: iliski.kaynak_id,
+                    to: iliski.hedef_id,
+                    label: iliski.iliski_tipi,
+                    arrows: "to"
+                };
+            });
+
+            grafiCiz(dugumler, kenarlar);
+        }
+
+        function grafiCizGlobalModu(veri) {
+            const dugumler = veri.sayfalar.map(function(sayfa) {
+                return {
+                    id: sayfa.id,
+                    label: sayfa.title,
+                    shape: "box",
+                    color: "#FFD700",
+                    title: "Sayfa ID: " + sayfa.id
+                };
+            });
+
+            const kenarlar = veri.baglantilar.map(function(baglanti) {
+                return {
+                    from: baglanti.sayfa_id_1,
+                    to: baglanti.sayfa_id_2,
+                    label: baglanti.ortak_kavram_ismi,
+                    arrows: ""
+                };
+            });
+
+            grafiCiz(dugumler, kenarlar);
+        }
+
+        function grafiCiz(dugumler, kenarlar) {
+            const container = document.getElementById("graf");
+            const grafVerisi = {
+                nodes: new vis.DataSet(dugumler),
+                edges: new vis.DataSet(kenarlar)
+            };
+            const secenekler = {
+                nodes: { shape: "dot", size: 16 },
+                edges: { font: { size: 10 }, color: "#888" },
+                physics: { stabilization: true }
+            };
+
+            const network = new vis.Network(container, grafVerisi, secenekler);
+
+            network.on("click", function(params) {
+                const bilgiDiv = document.getElementById("secili_dugum_bilgisi");
+                if (params.nodes.length > 0) {
+                    const secilenId = params.nodes[0];
+                    const secilenDugum = grafVerisi.nodes.get(secilenId);
+                    bilgiDiv.innerHTML = secilenDugum.title || secilenDugum.label;
+                } else {
+                    bilgiDiv.innerHTML = "";
+                }
+            });
+        }
+
+        window.onload = grafiGetir;
+    </script>
+</body>
+</html>
