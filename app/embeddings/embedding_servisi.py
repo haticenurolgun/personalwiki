@@ -12,18 +12,25 @@ _model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
 # Chroma istemcisini olustur 
 _chroma_client = chromadb.PersistentClient(path=CHROMA_VERI_YOLU)
 
-_koleksiyon = _chroma_client.get_or_create_collection(name="semantic_units")
+# metadata={"hnsw:space": "cosine"} -> Chroma varsayilan olarak L2
+# (Oklid) mesafesi kullanir, biz ise KOZINUS mesafesi istiyoruz. Kozinus
+# mesafesi 0 ile 1 arasinda oldugu icin "benzerlik = 1 - uzaklik" diye
+# yorumlamasi cok daha kolay ve sezgisel. Ayrica all-MiniLM-L6-v2 kendi
+# ciktisini zaten birim vektore (unit vector) normalize ediyor - bu
+# durumda L2 kare uzakligi ile kozinus uzakligi SIRALAMA olarak
+# matematiksel denk (L2kare = 2 - 2*kozinus_benzerlik), ama bunu ACIKCA
+# belirtmek, modelin bu normalize ozelligine sessizce guvenmek yerine
+# niyetimizi kod icinde net kilar - ileride farkli (normalize etmeyen)
+# bir modele gecilirse sessizce yanlis siralama vermez.
+_koleksiyon = _chroma_client.get_or_create_collection(
+    name="semantic_units",
+    metadata={"hnsw:space": "cosine"},
+)
 
 # Kavram isimlerini karsilastirmak icin AYRI bir koleksiyon. Neden ayri?
 # semantic_units koleksiyonu METIN PARCALARINI (uzun paragraflar) tutuyor,
 # bu koleksiyon ise sadece KISA KAVRAM ISIMLERINI (orn. "Kaan Aslan",
 # "1NF") tutacak - ikisini karistirmak anlamsiz sonuclar verir.
-#
-# metadata={"hnsw:space": "cosine"} -> Chroma varsayilan olarak L2
-# (Oklid) mesafesi kullanir, biz ise KOZINUS mesafesi istiyoruz. Kozinus
-# mesafesi 0 ile 1 arasinda oldugu icin "benzerlik = 1 - uzaklik" diye
-# yorumlamasi cok daha kolay ve sezgisel - esik belirlerken (orn. "%85
-# benzerlikten fazlaysa ayni say") bu netlik onemli.
 _kavram_koleksiyonu = _chroma_client.get_or_create_collection(
     name="concept_names",
     metadata={"hnsw:space": "cosine"},
