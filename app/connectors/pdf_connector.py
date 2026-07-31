@@ -64,9 +64,18 @@ def _tekrar_eden_satirlari_bul(sayfa_metinleri: list[str]) -> set[str]:
 
     esik_sayfa_sayisi = len(sayfa_metinleri) * TEKRAR_ESIGI_ORANI
 
+    # "sayi >= 2" sarti ONEMLI: "sayi >= esik_sayfa_sayisi" tek basina
+    # az sayfali PDF'lerde (1-2 sayfa) yanlis calisiyordu. Ornek: 1
+    # sayfalik bir PDF'te esik_sayfa_sayisi = 1*0.5 = 0.5 olur, ve
+    # SADECE BIR KEZ gecen (yani hic tekrar etmeyen) her satir bile
+    # "1 >= 0.5" oldugu icin yanlislikla "tekrar eden" sayilip
+    # siliniyordu - bu da TUM sayfanin icerigini bosaltip PDF'ten hic
+    # metin cikarilamamis gibi gorunmesine sebep oluyordu (gercekten
+    # yasandi, bkz. gecmis test). Bir satirin "tekrar eden" sayilmasi
+    # icin MANTIKEN en az 2 kez gecmesi sarttir - oran ne olursa olsun.
     return {
         satir for satir, sayi in satir_sayaci.items()
-        if sayi >= esik_sayfa_sayisi
+        if sayi >= esik_sayfa_sayisi and sayi >= 2
     }
 
 
