@@ -23,6 +23,7 @@ from app.models.db_models import (
 )
 from app.services.structural_parser import markdown_bol, parcalari_boyuta_gore_bol
 from app.embeddings.embedding_servisi import parcayi_kaydet, parcalari_sil, kavram_sil, token_sayisi
+from app.services.normalize import normalize_et
 
 router = APIRouter(prefix="/pages", tags=["Sayfalar"])
 
@@ -159,9 +160,11 @@ async def sayfayi_siniflandir(
     db: AsyncSession = Depends(veritabani_oturumu_getir),
 ):
     """
-    Bir WikiPage'in icerigine bakip, classifier.py'deki sabit
-    SAYFA_KATEGORILERI listesinden birini secer ve WikiPage.kategori
-    sutununa kaydeder. extract-concepts gibi MANUEL tetiklenir - sayfa
+    Bir WikiPage'in icerigine bakip, hangi KONUYA/DERSE ait oldugunu
+    belirler ve WikiPage.kategori sutununa kaydeder. Sabit bir liste
+    YOK - sistemde daha once olusturulmus konu isimleri LLM'e verilir,
+    ya birine eslesir (ayni klasore duser) ya da yeni bir konu ismi
+    onerilir. extract-concepts gibi MANUEL tetiklenir - sayfa
     eklenirken otomatik calismaz.
     """
     sonuc = await db.execute(select(WikiPage).where(WikiPage.id == sayfa_id))
@@ -170,14 +173,38 @@ async def sayfayi_siniflandir(
     if sayfa is None:
         raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
 
+    # Sistemde DAHA ONCE olusturulmus tum konu isimlerini topla - LLM'e
+    # "iste bunlar var, birine uyuyor mu" diye sorabilmek icin. Su anki
+    # sayfayi (henuz kategorisiz olabilir) ve bos degerleri disarida
+    # birakiyoruz.
+    mevcut_sonuc = await db.execute(
+        select(WikiPage.kategori)
+        .where(WikiPage.kategori.isnot(None), WikiPage.id != sayfa_id)
+        .distinct()
+    )
+    mevcut_konular = [satir[0] for satir in mevcut_sonuc.all()]
+
     # LLM cagrisi senkron calisiyor, thread'e gonderiyoruz ki event
     # loop bloklanmasin (concept_extractor.kavram_cikar ile ayni desen).
-    sonuc_siniflandirma = await asyncio.to_thread(sayfa_siniflandir, sayfa.content)
+    sonuc_siniflandirma = await asyncio.to_thread(sayfa_siniflandir, sayfa.content, mevcut_konular)
 
-    sayfa.kategori = sonuc_siniflandirma.kategori
+    # LLM'in dondurdugu konu, mevcut konulardan biriyle SADECE yazim
+    # farkiyla (buyuk/kucuk harf, Turkce karakter - orn. "calculus" ile
+    # "Calculus") ayni olabilir. Boyle bir durumda mevcut konunun
+    # YAZIMINI KORUYORUZ - yoksa yakin-ama-farkli-yazili, gereksiz
+    # ikinci bir "klasor" olusur (bkz. concepts.py'deki normalize_et
+    # kullanimi ile AYNI mantik, kavram dedup'i icin).
+    yeni_konu_normalize = normalize_et(sonuc_siniflandirma.kategori)
+    kategori = sonuc_siniflandirma.kategori
+    for mevcut in mevcut_konular:
+        if normalize_et(mevcut) == yeni_konu_normalize:
+            kategori = mevcut
+            break
+
+    sayfa.kategori = kategori
     await db.commit()
 
-    return SiniflandirmaCevabi(sayfa_id=sayfa_id, kategori=sonuc_siniflandirma.kategori)
+    return SiniflandirmaCevabi(sayfa_id=sayfa_id, kategori=kategori)
 
 
 @router.put("/{sayfa_id}/kategori", response_model=WikipageCevap)

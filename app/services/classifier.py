@@ -1,10 +1,20 @@
 # =============================================================================
 # classifier.py
 # =============================================================================
-# LLM kullanarak bir WikiPage'in icerigine bakip, SABIT bir kategori
-# listesinden birini secen servis. concept_extractor.py ile AYNI kural:
-# bu dosya veritabanina yazmaz, sadece metin alip yapilandirilmis bir
-# Python nesnesi dondurur.
+# LLM kullanarak bir WikiPage'in ICERIGININ hangi KONUYA/DERSE ait
+# oldugunu belirleyen servis. Sabit bir liste YOK (ontology.py'deki
+# KAVRAM_TIPLERI gibi degil) - bunun yerine, sistemde DAHA ONCE
+# olusturulmus konu isimleri LLM'e gosteriliyor: ya BIRINE uyduruluyor
+# (ayni klasore dusuyor) ya da YENI bir konu ismi oneriliyor (orn.
+# "Calculus", "Elektronik"). Boylece kullanici dosya yukledikce, ayni
+# derse ait notlar otomatik olarak AYNI klasorde birikiyor - yeni bir
+# konu gelirse de kendiliginden yeni bir klasor acilmis olur.
+#
+# concept_extractor.py ile AYNI kural: bu dosya veritabanina yazmaz,
+# sadece metin (+ mevcut konu listesi) alip yapilandirilmis bir Python
+# nesnesi dondurur. Mevcut konulari VERITABANINDAN cekmek ve isim
+# eslesmesindeki yazim farklarini (buyuk/kucuk harf, Turkce karakter)
+# normalize etmek CAGIRAN tarafin (pages.py) sorumlulugunda.
 # =============================================================================
 
 from dataclasses import dataclass
@@ -16,58 +26,59 @@ from app.config import ayarlar
 
 _client = genai.Client(api_key=ayarlar.GEMINI_API_KEY)
 
-# Sayfa siniflandirmasi icin sabit kategori listesi. ontology.py'deki
-# KAVRAM_TIPLERI'nden FARKLI bir amaca hizmet ediyor: KAVRAM_TIPLERI bir
-# sayfa ICINDEKI tek tek kavramlari tipliyor (orn. "1NF" -> TERIM), bu
-# liste ise sayfanin KENDISINI (butun olarak) siniflandiriyor.
-SAYFA_KATEGORILERI = [
-    "DERS_NOTU",         # bir teknik/akademik konuyu anlatan ogrenme notu
-    "SINAV_HAZIRLIK",    # sinav/mulakat icin ozet, tekrar, soru-cevap notu
-    "PROJE_DOKUMANI",    # bir proje ile ilgili planlama/teknik belge
-    "TOPLANTI_NOTU",     # toplanti tutanagi, alinan kararlar
-    "GOREV_LISTESI",     # yapilacaklar/TODO tarzi bir liste
-    "FIKIR",             # beyin firtinasi, taslak/olgunlasmamis fikirler
-    "SUREC_DOKUMANI",    # "nasil yapilir" rehberi, ic prosedur (orn. "deploy nasil yapilir")
-    "REFERANS",          # bir dis kaynagin (makale, kitap, web sitesi) ozeti
-    "KISISEL",           # aile, gunluk, kisisel bilgiler
-    "DIGER",             # hicbiri uymuyorsa
-]
-
 
 @dataclass
 class SiniflandirmaSonucu:
     kategori: str
 
 
-def sayfa_siniflandir(icerik: str) -> SiniflandirmaSonucu:
+def sayfa_siniflandir(icerik: str, mevcut_konular: list[str]) -> SiniflandirmaSonucu:
     """
-    Verilen sayfa icerigine bakip, SAYFA_KATEGORILERI listesinden
-    birini secer. LLM listede olmayan bir sey donerse (ya da JSON
-    bozuksa), guvenli varsayilan olarak "DIGER" kullanilir - concept_
-    extractor.py'deki "ontoloji disi tip -> OnerilenTur" mantiginin
-    aksine, burada MVP icin ayri bir onay tablosu yok, direkt DIGER'e
-    dusuyor.
+    Verilen sayfa icerigine bakip, hangi KONUYA/DERSE ait oldugunu
+    belirler.
+
+    mevcut_konular: sistemde DAHA ONCE olusturulmus konu/klasor
+    isimlerinin listesi (orn. ["Calculus", "Elektronik"]). LLM'e bu
+    liste veriliyor ki, ayni konudaki YENI bir sayfa geldiginde var
+    olan klasore duzgunce eslesebilsin - her seferinde farkli isimli
+    yeni bir klasor acmak yerine.
+
+    LLM'den anlamli bir cevap alinamazsa (JSON bozuksa, ya da bos
+    donerse), guvenli varsayilan olarak "Diger" kullanilir.
     """
 
-    kategori_metni = ", ".join(SAYFA_KATEGORILERI)
+    if mevcut_konular:
+        konu_listesi_metni = ", ".join(mevcut_konular)
+        baglam = f"""Sistemde su an bu konu/klasor isimleri kayitli:
+        {konu_listesi_metni}
+
+        Bu, kullanicinin KISISEL wiki'si - aile notlari, ders notlari,
+        is/proje notlari gibi BIRBIRINDEN TAMAMEN FARKLI konular ayni
+        sistemde bir arada bulunabilir. Bu yuzden ONEMLI: bir konuyu
+        SADECE metnin icinde o konuyla ilgili TEK BIR KELIME/TERIM
+        gectigi icin secme - metnin GENELININ, BUTUN OLARAK o konu
+        hakkinda olmasi gerekir. Ornegin metin esas olarak aile
+        bilgilerinden bahsediyorsa ama arada "veritabani kuruyor" gibi
+        TEK bir cumle geciyorsa, bu metni "Veritabanlari" konusuna
+        DAHIL ETME - bu durumda metnin ASIL konusuna gore yeni bir
+        etiket sec (orn. "Kisisel").
+
+        Eger metnin GENELI, listedeki konulardan BIRIYLE GERCEKTEN
+        ayniysa, o konunun ismini BIREBIR AYNEN kullan (yeni bir isim
+        uydurma, kucuk yazim farkli bir versiyonunu da uretme). Emin
+        degilsen, yanlis eslestirmektense YENI bir konu onermeyi
+        TERCIH ET. Hicbiri uymuyorsa, metnin konusunu KISA (1-3
+        kelime), GENEL bir konu/ders ismiyle etiketle (orn. "Calculus",
+        "Elektronik", "Veritabanlari", "Kisisel")."""
+    else:
+        baglam = """Henuz hicbir konu kaydedilmemis. Metnin konusunu
+        KISA (1-3 kelime), GENEL bir konu/ders ismiyle etiketle (orn.
+        "Calculus", "Elektronik", "Veritabanlari")."""
 
     prompt = f"""Asagidaki metin, kullanicinin kisisel wiki'sindeki bir
-    sayfadir. Bu sayfayi SADECE su kategorilerden birine ata:
-    {kategori_metni}
+    sayfadir. Bu sayfanin hangi KONUYA/DERSE ait oldugunu belirle.
 
-    - DERS_NOTU: bir teknik/akademik konuyu anlatan ogrenme notu
-    - SINAV_HAZIRLIK: sinav/mulakat icin ozet, tekrar, soru-cevap notu
-      (DERS_NOTU'ndan farki: bu SIKISTIRILMIS/pratik amaclidir, derinlemesine anlatmaz)
-    - PROJE_DOKUMANI: bir proje ile ilgili planlama/teknik belge
-    - TOPLANTI_NOTU: bir toplantinin tutanagi, orada alinan kararlar
-    - GOREV_LISTESI: yapilacaklar/TODO tarzi, SOMUT eylem iceren bir liste
-    - FIKIR: beyin firtinasi, henuz somut eyleme donusmemis taslak fikirler
-    - SUREC_DOKUMANI: "bir sey nasil yapilir" rehberi, ic prosedur
-      (orn. "deploy nasil yapilir") - REFERANS'tan farki DIS bir kaynagi
-      degil, KENDI/sirket ici bir sureci anlatir
-    - REFERANS: bir dis kaynagin (makale, kitap, web sitesi) ozeti
-    - KISISEL: aile, gunluk, kisisel bilgiler
-    - DIGER: yukaridakilerden hicbiri uymuyorsa
+    {baglam}
 
     Metin:
     {icerik}
@@ -86,11 +97,10 @@ def sayfa_siniflandir(icerik: str) -> SiniflandirmaSonucu:
     try:
         veri = json.loads(yanit.text)
     except json.JSONDecodeError:
-        return SiniflandirmaSonucu(kategori="DIGER")
+        return SiniflandirmaSonucu(kategori="Diger")
 
-    kategori = veri.get("kategori", "DIGER")
-
-    if kategori not in SAYFA_KATEGORILERI:
-        kategori = "DIGER"
+    kategori = veri.get("kategori", "").strip()
+    if not kategori:
+        kategori = "Diger"
 
     return SiniflandirmaSonucu(kategori=kategori)
