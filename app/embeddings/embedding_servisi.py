@@ -1,4 +1,5 @@
 import os
+import numpy as np
 from sentence_transformers import SentenceTransformer
 import chromadb
 
@@ -173,6 +174,49 @@ def benzer_kavram_bul(isim: str, tip: str, esik: float) -> dict | None:
             "isim": en_yakin_isim,
             "benzerlik": benzerlik,
         }
+
+    return None
+
+
+# en_benzer_konuyu_bul, LLM'in "bu konu, mevcut listedeki X ile ayni"
+# dedigi eslesmeyi DOGRULAMAK (bir GUVENLIK AGI olarak) icin kullanilir
+# - LLM'in kendi eslestirme kararinin YERINE GECMEK icin degil (bkz.
+# classifier.py'deki NEDEN IKI ALAN aciklamasi). Bu yuzden esik BILINCLI
+# OLARAK DUSUK/TOLERANSLI secildi: amac sadece capalama-onyargili,
+# TAMAMEN ALAKASIZ eslesmeleri (orn. "Gravio" ile "ATLAS", olculen
+# benzerlik 0.26) yakalamak - LLM'in kendi dunya bilgisiyle yaptigi,
+# kelime bazinda dusuk benzerlikli ama GERCEKTEN dogru esleme
+# (orn. "PostgreSQL" ile "Veritabanlari") kararlarina KARISMAMAK.
+KATEGORI_DOGRULAMA_ESIGI = 0.40
+
+
+def en_benzer_konuyu_bul(konu: str, mevcut_konular: list[str], esik: float = KATEGORI_DOGRULAMA_ESIGI) -> str | None:
+    """
+    Verilen bir konu ismine, mevcut_konular listesinden ANLAMCA en
+    yakin olani (esigin ustundeyse) dondurur. Chroma'ya hic ihtiyac
+    yok - kisisel bir wiki'deki konu sayisi kucuk oldugu icin (onlarca,
+    yuzlerce degil), dogrudan bellekte kozinus benzerligi hesaplamak
+    yeterli ve daha basit.
+    """
+    if not mevcut_konular:
+        return None
+
+    konu_vektoru = _model.encode(konu)
+    aday_vektorleri = _model.encode(mevcut_konular)
+
+    en_iyi_benzerlik = -1.0
+    en_iyi_aday = None
+    for aday, aday_vektoru in zip(mevcut_konular, aday_vektorleri):
+        # Model ciktisi zaten birim vektor (unit vector) oldugu icin
+        # (bkz. embedding_servisi.py'deki cosine yorumu), iki vektorun
+        # ic carpimi (dot product) DOGRUDAN kozinus benzerligine esittir.
+        benzerlik = float(np.dot(konu_vektoru, aday_vektoru))
+        if benzerlik > en_iyi_benzerlik:
+            en_iyi_benzerlik = benzerlik
+            en_iyi_aday = aday
+
+    if en_iyi_benzerlik >= esik:
+        return en_iyi_aday
 
     return None
 
