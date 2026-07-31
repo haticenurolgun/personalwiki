@@ -15,7 +15,7 @@ from app.embeddings.embedding_servisi import parcayi_kaydet, token_sayisi
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from app.connectors.pdf_connector import pdf_metnini_cikar
 from app.connectors.markdown_connector import markdown_metnini_cikar
-from app.services.structural_parser import parcalari_boyuta_gore_bol, liste_maddelerine_gore_bol
+from app.services.structural_parser import parcalari_boyuta_gore_bol, liste_maddelerine_gore_bol, bos_parcalari_temizle
 # prefix="/sources" -> bu router'daki her endpoint otomatik olarak
 # /sources ile baslar. tags=[...] ise sadece /docs sayfasinda
 # endpoint'lerin hangi baslik altinda gruplanacagini belirler.
@@ -35,6 +35,11 @@ async def markdown_ekle(istek: MarkdownEkle, db :AsyncSession = Depends(veritaba
     # 1) Icerigi baslik/bolum bazinda parcalara ayir - pdf_ekle'deki
     #    pdf_metnini_cikar'in dosyasiz karsiligi.
     parcalar = markdown_metnini_cikar(istek.content)
+
+    # 1.35) Icerigi BOS olan parcalari ele - orn. bir baslik hemen
+    #    ardindan baska bir baslik geliyorsa (aralarinda govde metni
+    #    yoksa) olusan bos parcalar. Bos metnin embedding'i anlamsizdir.
+    parcalar = bos_parcalari_temizle(parcalar)
 
     # 1.4) Bir bolum TAMAMEN bagimsiz liste maddelerinden olusuyorsa
     #    (orn. bir sinav takvimi), her maddeyi ayri parca yap - yoksa
@@ -133,6 +138,10 @@ async def pdf_ekle(
             status_code=422,
             detail="PDF'ten metin cikarilamadi - dosya bos veya sadece goruntuden olusuyor olabilir (OCR gerektirebilir)"
         )
+
+    # 4.35) Icerigi BOS olan parcalari ele - bkz. markdown_ekle'deki
+    #    ayni adim, PDF'lerde de (basliklar arasi bosluk) yasaniyor.
+    parcalar = bos_parcalari_temizle(parcalar)
 
     # 4.4) Bir bolum TAMAMEN bagimsiz liste maddelerinden olusuyorsa,
     #    her maddeyi ayri parca yap - yoksa embedding birden fazla

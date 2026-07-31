@@ -21,7 +21,7 @@ from app.models.db_models import (
     ConceptRelation,
     KavramGorulme
 )
-from app.services.structural_parser import markdown_bol, parcalari_boyuta_gore_bol, liste_maddelerine_gore_bol
+from app.services.structural_parser import markdown_bol, parcalari_boyuta_gore_bol, liste_maddelerine_gore_bol, bos_parcalari_temizle
 from app.embeddings.embedding_servisi import (
     parcayi_kaydet,
     parcalari_sil,
@@ -91,6 +91,9 @@ async def sayfayi_indexle(
         )
 
     parcalar = markdown_bol(sayfa.content)
+
+    # Icerigi BOS olan parcalari ele.
+    parcalar = bos_parcalari_temizle(parcalar)
 
     # Bir bolum TAMAMEN bagimsiz liste maddelerinden olusuyorsa, her
     # maddeyi ayri parca yap - yoksa embedding birden fazla bagimsiz

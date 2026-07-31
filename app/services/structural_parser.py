@@ -111,6 +111,15 @@ def parcalari_boyuta_gore_bol(
             sonuc.append(parca)
             continue
 
+        # Bu TEK parcadan uretilen alt-parcalari ONCE AYRI bir listede
+        # (parca_sonuclari) topluyoruz, dogrudan sonuc'a eklemiyoruz -
+        # boylece asagidaki "cok kucuk artik parcalari birlestir"
+        # adimini SADECE bu parcanin kendi alt-parcalari arasinda
+        # yapabiliriz. Eger dogrudan sonuc'a eklesek, bu parcanin son
+        # (kucuk) alt-parcasi YANLISLIKLA bir SONRAKI, TAMAMEN FARKLI
+        # bolumun/liste maddesinin ilk parcasiyla birlesebilirdi.
+        parca_sonuclari: list[MetinParcasi] = []
+
         # Once paragraf sinirlarindan (bos satir) parcala.
         paragraflar = [p for p in parca.icerik.split("\n\n") if p.strip()]
 
@@ -118,7 +127,7 @@ def parcalari_boyuta_gore_bol(
 
         def alt_parcayi_kaydet():
             if biriken_paragraflar:
-                sonuc.append(MetinParcasi(
+                parca_sonuclari.append(MetinParcasi(
                     baslik=parca.baslik,
                     icerik="\n\n".join(biriken_paragraflar),
                     seviye=parca.seviye,
@@ -142,7 +151,7 @@ def parcalari_boyuta_gore_bol(
                     aday_kelimeler = biriken_kelimeler + [kelime]
                     if token_sayan_fonksiyon(" ".join(aday_kelimeler)) > maks_token:
                         if biriken_kelimeler:
-                            sonuc.append(MetinParcasi(
+                            parca_sonuclari.append(MetinParcasi(
                                 baslik=parca.baslik,
                                 icerik=" ".join(biriken_kelimeler),
                                 seviye=parca.seviye,
@@ -152,7 +161,7 @@ def parcalari_boyuta_gore_bol(
                         biriken_kelimeler = aday_kelimeler
 
                 if biriken_kelimeler:
-                    sonuc.append(MetinParcasi(
+                    parca_sonuclari.append(MetinParcasi(
                         baslik=parca.baslik,
                         icerik=" ".join(biriken_kelimeler),
                         seviye=parca.seviye,
@@ -167,6 +176,55 @@ def parcalari_boyuta_gore_bol(
                 biriken_paragraflar = aday
 
         alt_parcayi_kaydet()
+
+        # Cok kucuk kalan artik alt-parcalari (orn. bir paragrafin/
+        # kelime dizisinin en sonunda kalan bir kac kelimelik kalinti),
+        # hemen ONCEKI alt-parcayla BIRLESTIR - bkz. _kucuk_artiklari_
+        # birlestir docstring'i. Sadece bu TEK parcanin alt-parcalari
+        # arasinda calisiyor, farkli bolum/liste maddeleriyle karismaz.
+        sonuc.extend(_kucuk_artiklari_birlestir(parca_sonuclari, token_sayan_fonksiyon))
+
+    return sonuc
+
+
+# Bir alt-parca, bu kadar TOKEN'DAN AZ ise "cok kucuk" sayilir ve
+# komsu parcayla birlestirilir. NEDEN: tek basina anlamli bir
+# embedding uretemeyecek kadar kisa parcalar (orn. bir paragrafin
+# sonunda kalan "cozulmelidir.</u>**" gibi bir kac kelimelik cumle
+# artigi), aramada "gurultu" gibi davraniyor - anlamsiz oldugu icin
+# ALAKASIZ sorgularda bile garip sekilde orta seviye benzerlik skoru
+# alip gercek sonuclarin yerini caliyor. Gercek kullanimda test
+# edilerek bulundu.
+MIN_PARCA_TOKEN = 20
+
+
+def _kucuk_artiklari_birlestir(parcalar: list[MetinParcasi], token_sayan_fonksiyon) -> list[MetinParcasi]:
+    """
+    Ardisik alt-parcalar arasinda MIN_PARCA_TOKEN'dan kucuk olanlari,
+    bir ONCEKI alt-parcayla birlestirir. SADECE parcalari_boyuta_gore_
+    bol icinde, TEK bir kaynak bolumden uretilen alt-parcalar
+    uzerinde cagrilir - bu yuzden farkli bolumler/liste maddeleri
+    ASLA birbirine karismaz (cagiran kod bunu garanti ediyor).
+
+    NOT: birlestirme sonucu maks_token'i BIRAZ asabilir (MIN_PARCA_
+    TOKEN kadar) - bu kabul edilebilir bir bedel, cunku alternatifi
+    (kucuk, anlamsiz bir "yetim" parca birakmak) arama kalitesi icin
+    daha kotu.
+    """
+    if not parcalar:
+        return parcalar
+
+    sonuc = [parcalar[0]]
+    for parca in parcalar[1:]:
+        if token_sayan_fonksiyon(parca.icerik) < MIN_PARCA_TOKEN:
+            onceki = sonuc[-1]
+            sonuc[-1] = MetinParcasi(
+                baslik=onceki.baslik,
+                icerik=onceki.icerik + "\n\n" + parca.icerik,
+                seviye=onceki.seviye,
+            )
+        else:
+            sonuc.append(parca)
 
     return sonuc
 
@@ -232,3 +290,20 @@ def liste_maddelerine_gore_bol(parcalar: list[MetinParcasi]) -> list[MetinParcas
             sonuc.append(parca)
 
     return sonuc
+
+
+def bos_parcalari_temizle(parcalar: list[MetinParcasi]) -> list[MetinParcasi]:
+    """
+    Icerigi BOS (ya da sadece bosluk) olan parcalari eler.
+
+    NEDEN GEREKLI: bir baslik, hemen ardindan baska bir baslik
+    geliyorsa (aralarinda govde metni yoksa - orn. "# Baslik\n##
+    Alt Baslik") markdown_bol, "Baslik" icin BOS icerikli bir
+    MetinParcasi uretir. Boyle bir parca SemanticUnit olarak
+    kaydedilip embed edilirse (BOS bir metnin embedding'i!), LLM'e
+    "hicbir bilgi tasimayan" bir "kaynak" olarak sunulur - arama/
+    sohbet baglamini gereksiz yere kalabaliklastirir, gercek bilgiyi
+    "sulandirir". Gercek kullanimda bulundu: 452 unit'in 51'i (%11)
+    bos cikmisti.
+    """
+    return [parca for parca in parcalar if parca.icerik.strip()]
