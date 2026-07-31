@@ -14,6 +14,7 @@ Calistirmak icin (venv aktifken, ayri bir terminalde):
     python desktop_demo.py
 """
 
+import html
 import os
 import sys
 
@@ -228,6 +229,224 @@ class YeniSayfaDialogu(QDialog):
         self.accept()
 
 
+class SayfaDetayDialogu(QDialog):
+    """
+    Sayfalar listesindeki bir sayfaya CIFT TIKLAYINCA acilan detay
+    penceresi. Tam icerigi gosterir, kategoriyi ELLE duzeltmeye
+    (siniflandirma bazen yanilabiliyor - bkz. proje notlari) ve
+    sayfadan kavram/iliski cikarmaya izin verir.
+
+    Ilgili endpoint'ler: GET /pages/{id}, PUT /pages/{id}/kategori,
+    POST /pages/{id}/extract-concepts.
+    """
+
+    def __init__(self, sayfa_id: int, parent=None):
+        super().__init__(parent)
+        self.sayfa_id = sayfa_id
+        self.setWindowTitle(f"Sayfa #{sayfa_id}")
+        self.resize(600, 550)
+
+        self.baslik_etiketi = QLabel("Yukleniyor...")
+        self.baslik_etiketi.setStyleSheet("font-size: 16px; font-weight: 700; color: #03045E;")
+
+        self.tarih_etiketi = QLabel("")
+
+        self.kategori_kutusu = QLineEdit()
+        self.kategori_guncelle_butonu = QPushButton("Kategoriyi Guncelle")
+        self.kategori_guncelle_butonu.clicked.connect(self.kategoriyi_guncelle)
+
+        kategori_satiri = QHBoxLayout()
+        kategori_satiri.addWidget(QLabel("Kategori:"))
+        kategori_satiri.addWidget(self.kategori_kutusu)
+        kategori_satiri.addWidget(self.kategori_guncelle_butonu)
+
+        self.icerik_kutusu = QTextEdit()
+        self.icerik_kutusu.setReadOnly(True)
+
+        self.kavram_cikar_butonu = QPushButton("Kavram Cikar")
+        self.kavram_cikar_butonu.clicked.connect(self.kavram_cikar)
+
+        self.durum_etiketi = QLabel("")
+        self.durum_etiketi.setWordWrap(True)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.baslik_etiketi)
+        layout.addWidget(self.tarih_etiketi)
+        layout.addLayout(kategori_satiri)
+        layout.addWidget(QLabel("Icerik:"))
+        layout.addWidget(self.icerik_kutusu)
+        layout.addWidget(self.kavram_cikar_butonu)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+        self.sayfayi_yukle()
+
+    def sayfayi_yukle(self):
+        try:
+            yanit = requests.get(f"{BACKEND_URL}/pages/{self.sayfa_id}", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        sayfa = yanit.json()
+        self.baslik_etiketi.setText(sayfa["title"])
+        self.tarih_etiketi.setText(f"Olusturulma: {sayfa['created_at']}")
+        self.kategori_kutusu.setText(sayfa.get("kategori") or "")
+        self.icerik_kutusu.setPlainText(sayfa["content"])
+
+    def kategoriyi_guncelle(self):
+        """
+        PUT /pages/{id}/kategori - otomatik siniflandirmanin (LLM)
+        aksine, kullanicinin YAZDIGI HERHANGI BIR METNI dogrudan
+        kaydeder, hicbir dogrulama/eslestirme yapmadan (bkz. pages.py
+        kategoriyi_guncelle endpoint'i) - kullanici LLM'in kararini
+        ISTEDIGI GIBI ezebilir.
+        """
+        yeni_kategori = self.kategori_kutusu.text().strip()
+        if not yeni_kategori:
+            self.durum_etiketi.setText("Kategori bos olamaz")
+            return
+
+        try:
+            yanit = requests.put(
+                f"{BACKEND_URL}/pages/{self.sayfa_id}/kategori",
+                json={"kategori": yeni_kategori},
+                timeout=10,
+            )
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        self.durum_etiketi.setText("Kategori guncellendi")
+
+    def kavram_cikar(self):
+        self.durum_etiketi.setText("Kavramlar cikariliyor (LLM cagrisi, biraz surebilir)...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.post(
+                f"{BACKEND_URL}/pages/{self.sayfa_id}/extract-concepts", timeout=120
+            )
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        sonuc = yanit.json()
+        self.durum_etiketi.setText(
+            f"{sonuc['olusturulan_kavram_sayisi']} kavram, "
+            f"{sonuc['olusturulan_iliski_sayisi']} iliski cikarildi "
+            f"({sonuc['onerilen_yeni_tip_sayisi']} yeni tip onerisi)"
+        )
+
+
+class SohbetSekmesi(QWidget):
+    """
+    "Sohbet" sekmesi: kullanicinin KENDI notlarina soru sordugu RAG
+    (Retrieval-Augmented Generation) arayuzu. POST /chat'e baglanir -
+    backend, soruyla en alakali parcalari bulup (embedding + ontoloji
+    bazli hibrit arama), LLM'e "SADECE bu parcalari kullanarak cevap
+    ver" talimatiyla gonderiyor (bkz. chat_servisi.py) - boylece LLM
+    kendi genel bilgisini "uydurmuyor" (halusinasyon onleniyor).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # Konusma GECMISINI gostermek icin salt-okunur bir QTextEdit
+        # kullaniyoruz - HTML icerik ekleyebildigi icin (append ile),
+        # kalin/italik yazarak "Sen:" / "PersonalWiki AI:" ayrimini
+        # kolayca gosterebiliyoruz.
+        self.gecmis_kutusu = QTextEdit()
+        self.gecmis_kutusu.setReadOnly(True)
+
+        self.soru_kutusu = QLineEdit()
+        self.soru_kutusu.setPlaceholderText("Notlarina bir soru sor... (orn. 'event loop nedir')")
+        self.soru_kutusu.returnPressed.connect(self.soru_sor)
+
+        self.gonder_butonu = QPushButton("Gonder")
+        self.gonder_butonu.clicked.connect(self.soru_sor)
+
+        self.durum_etiketi = QLabel("Hazir")
+
+        soru_satiri = QHBoxLayout()
+        soru_satiri.addWidget(self.soru_kutusu)
+        soru_satiri.addWidget(self.gonder_butonu)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.gecmis_kutusu)
+        layout.addLayout(soru_satiri)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+    def soru_sor(self):
+        """
+        NOT: Bu cagri SENKRON (requests.post bloklar). AramaSekmesi'nde
+        bu "localhost'a giden istek zaten hizli" diye basit tutulmustu,
+        ama /chat bir LLM cagrisi ICERDIGI icin (embedding aramasindan
+        cok daha yavas) birkac saniye surebilir - bu yuzden "Dusunuyor..."
+        durum yazisi ve kutulari GECICI OLARAK devre disi birakma
+        (kullanici ikinci bir soruyu ustune bindirmesin diye) burada
+        daha onemli.
+        """
+        soru = self.soru_kutusu.text().strip()
+        if not soru:
+            return
+
+        self.soru_kutusu.setEnabled(False)
+        self.gonder_butonu.setEnabled(False)
+        self.durum_etiketi.setText("Dusunuyor... (LLM cagrisi, birkac saniye surebilir)")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.post(
+                f"{BACKEND_URL}/chat",
+                json={"soru": soru, "limit": 5},
+                timeout=60,
+            )
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText(
+                "Backend'e baglanilamadi - 'uvicorn main:app --reload' calisiyor mu?"
+            )
+            self.soru_kutusu.setEnabled(True)
+            self.gonder_butonu.setEnabled(True)
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            self.soru_kutusu.setEnabled(True)
+            self.gonder_butonu.setEnabled(True)
+            return
+
+        sonuc = yanit.json()
+        kaynaklar = ", ".join(sonuc["kullanilan_kaynaklar"]) or "yok"
+
+        # html.escape: soru/cevap metninde "<" gibi karakterler gecerse
+        # (orn. kod ornegi iceren bir cevap), bunlar HTML etiketi
+        # SANILMASIN diye kacis (escape) yapiyoruz - yoksa gecmis
+        # kutusundaki gorunum bozulabilir.
+        self.gecmis_kutusu.append(f"<p><b>Sen:</b> {html.escape(soru)}</p>")
+        self.gecmis_kutusu.append(f"<p><b>PersonalWiki AI:</b> {html.escape(sonuc['cevap'])}</p>")
+        self.gecmis_kutusu.append(f"<p><i>Kaynaklar: {html.escape(kaynaklar)}</i></p><hr>")
+
+        self.soru_kutusu.clear()
+        self.durum_etiketi.setText("Hazir")
+        self.soru_kutusu.setEnabled(True)
+        self.gonder_butonu.setEnabled(True)
+        self.soru_kutusu.setFocus()
+
+
 class AramaSekmesi(QWidget):
     """
     "Ara" sekmesi: arama kutusu + sonuc listesi. GET /search'e baglanir.
@@ -312,15 +531,20 @@ class AramaSekmesi(QWidget):
 class SayfalarSekmesi(QWidget):
     """
     "Sayfalar" sekmesi: var olan sayfalarin listesi + yonetim islemleri
-    (yeni sayfa, PDF yukleme, siniflandirma, silme). Ilgili endpoint'ler:
-    GET /pages, POST /sources/pdf, POST /pages/{id}/classify,
-    DELETE /pages/{id}.
+    (yeni sayfa, PDF yukleme, siniflandirma, silme, detay goruntuleme).
+    Ilgili endpoint'ler: GET /pages, POST /sources/pdf,
+    POST /pages/{id}/classify, DELETE /pages/{id}. Bir sayfaya CIFT
+    TIKLAYINCA (ya da "Detay Ac" ile) SayfaDetayDialogu acilir - orada
+    da PUT /pages/{id}/kategori ve POST /pages/{id}/extract-concepts var.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.sayfa_listesi = QListWidget()
+        # Cift tiklama ile de detay penceresi acilsin - "Detay Ac"
+        # butonuna basmak zorunda kalmadan.
+        self.sayfa_listesi.itemDoubleClicked.connect(self.sayfa_detayini_ac)
 
         self.yenile_butonu = QPushButton("Yenile")
         self.yenile_butonu.clicked.connect(self.sayfalari_yukle)
@@ -330,6 +554,9 @@ class SayfalarSekmesi(QWidget):
 
         self.pdf_yukle_butonu = QPushButton("PDF Yukle")
         self.pdf_yukle_butonu.clicked.connect(self.pdf_yukle)
+
+        self.detay_butonu = QPushButton("Detay Ac")
+        self.detay_butonu.clicked.connect(self.secili_sayfa_detayini_ac)
 
         self.siniflandir_butonu = QPushButton("Siniflandir")
         self.siniflandir_butonu.clicked.connect(self.secili_sayfayi_siniflandir)
@@ -346,6 +573,7 @@ class SayfalarSekmesi(QWidget):
         ust_satir.addWidget(self.pdf_yukle_butonu)
 
         alt_satir = QHBoxLayout()
+        alt_satir.addWidget(self.detay_butonu)
         alt_satir.addWidget(self.siniflandir_butonu)
         alt_satir.addWidget(self.sil_butonu)
 
@@ -391,6 +619,27 @@ class SayfalarSekmesi(QWidget):
             self.durum_etiketi.setText("Once listeden bir sayfa sec")
             return None
         return oge.data(Qt.ItemDataRole.UserRole)
+
+    def sayfa_detayini_ac(self, oge: QListWidgetItem):
+        """
+        QListWidget.itemDoubleClicked sinyali, tiklanan OGEYI parametre
+        olarak veriyor - _secili_sayfa_id'nin aksine burada ekstra bir
+        "hangi satir secili" kontrolune gerek yok, cift tiklanan oge
+        zaten belli.
+        """
+        sayfa_id = oge.data(Qt.ItemDataRole.UserRole)
+        dialog = SayfaDetayDialogu(sayfa_id, self)
+        dialog.exec()
+        # Kategori dialogda degismis olabilir (Kategoriyi Guncelle ile) -
+        # listeyi yenileyip guncel halini gosterelim.
+        self.sayfalari_yukle()
+
+    def secili_sayfa_detayini_ac(self):
+        oge = self.sayfa_listesi.currentItem()
+        if oge is None:
+            self.durum_etiketi.setText("Once listeden bir sayfa sec")
+            return
+        self.sayfa_detayini_ac(oge)
 
     def secili_sayfayi_siniflandir(self):
         sayfa_id = self._secili_sayfa_id()
@@ -486,8 +735,8 @@ class SayfalarSekmesi(QWidget):
 class AnaPencere(QMainWindow):
     """
     Uygulamanin ANA penceresi. Icerigi bir QTabWidget (sekmeler) -
-    "Ara" ve "Sayfalar" - olusturuyor, her sekme kendi widget class'inda
-    (AramaSekmesi, SayfalarSekmesi) yasiyor.
+    "Sohbet", "Ara" ve "Sayfalar" - olusturuyor, her sekme kendi widget
+    class'inda (SohbetSekmesi, AramaSekmesi, SayfalarSekmesi) yasiyor.
     """
 
     def __init__(self):
@@ -499,6 +748,7 @@ class AnaPencere(QMainWindow):
         baslik_etiketi.setStyleSheet("font-size: 20px; font-weight: 700; color: #03045E;")
 
         sekmeler = QTabWidget()
+        sekmeler.addTab(SohbetSekmesi(), "Sohbet")
         sekmeler.addTab(AramaSekmesi(), "Ara")
         sekmeler.addTab(SayfalarSekmesi(), "Sayfalar")
 
