@@ -1,0 +1,525 @@
+"""
+desktop_demo.py
+
+PersonalWiki AI'nin gercek bir masaustu uygulamasi gibi calisabildigini
+gostermek icin kucuk bir PyQt6 demo'su. Backend'i (FastAPI) DEGISTIRMEZ -
+sadece http://127.0.0.1:8000 uzerinde CALISAN bir sunucuya HTTP
+istekleriyle baglanan bir istemci (client) penceresidir.
+
+ONEMLI: Bu uygulamayi calistirmadan ONCE backend'in ayri bir terminalde
+calisiyor olmasi gerekir:
+    uvicorn main:app --reload
+
+Calistirmak icin (venv aktifken, ayri bir terminalde):
+    python desktop_demo.py
+"""
+
+import os
+import sys
+
+import requests
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QDialog,
+    QTabWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QTextEdit,
+    QPushButton,
+    QListWidget,
+    QListWidgetItem,
+    QLabel,
+    QFileDialog,
+    QMessageBox,
+)
+
+BACKEND_URL = "http://127.0.0.1:8000"
+
+
+def http_hata_mesaji(hata: requests.exceptions.RequestException) -> str:
+    """
+    requests bir HTTP hatasi (orn. 422, 400, 500) firlattiginda,
+    varsayilan hata metni sadece "422 Client Error: Unprocessable
+    Entity for url: ..." gibi genel bir ozet veriyor - backend'in
+    GERCEK sebep aciklamasini (FastAPI'nin standart {"detail": "..."}
+    govdesi) GOSTERMIYOR. Bu fonksiyon, mumkunse o "detail" alanini
+    cikarip kullaniciya asil sebebi gosteriyor.
+    """
+    yanit = getattr(hata, "response", None)
+    if yanit is not None:
+        try:
+            detay = yanit.json().get("detail")
+            if detay:
+                return str(detay)
+        except ValueError:
+            pass  # govde JSON degilse, asagida genel hata metnine dusuyoruz
+    return str(hata)
+
+# Deniz mavisi tonlarinda bir renk skalasi (acikdan koyuya):
+# CAF0F8 - ADE8F4 - 90E0EF - 00B4D8 - 0096C7 - 0077B6 - 023E8A - 03045E
+# QSS (Qt Style Sheet), CSS'e cok benziyor - PyQt widget'larina CSS
+# yazar gibi stil verebiliyoruz. QApplication'a UYGULANDIGINDA butun
+# pencereler/dialoglar bu stili otomatik miras alir.
+DENIZ_MAVISI_STIL = """
+QMainWindow, QDialog {
+    background-color: #CAF0F8;
+}
+QWidget {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    color: #03045E;
+}
+QLabel {
+    color: #023E8A;
+    font-weight: 600;
+}
+QLabel[ipucu="true"] {
+    color: #0077B6;
+    font-weight: 400;
+    font-style: italic;
+}
+QLineEdit, QTextEdit {
+    background-color: white;
+    border: 2px solid #0096C7;
+    border-radius: 6px;
+    padding: 6px;
+}
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid #023E8A;
+}
+QPushButton {
+    background-color: #0077B6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background-color: #023E8A;
+}
+QPushButton:pressed {
+    background-color: #03045E;
+}
+QPushButton#silButonu {
+    background-color: #D00000;
+}
+QPushButton#silButonu:hover {
+    background-color: #9D0208;
+}
+QListWidget {
+    background-color: white;
+    border: 2px solid #90E0EF;
+    border-radius: 6px;
+}
+QListWidget::item {
+    padding: 8px;
+    border-bottom: 1px solid #ADE8F4;
+}
+QListWidget::item:selected {
+    background-color: #90E0EF;
+    color: #03045E;
+}
+QTabWidget::pane {
+    border: 2px solid #0096C7;
+    border-radius: 6px;
+    background-color: #E0FBFC;
+}
+QTabBar::tab {
+    background-color: #ADE8F4;
+    color: #023E8A;
+    padding: 8px 18px;
+    font-weight: 600;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+QTabBar::tab:selected {
+    background-color: #0077B6;
+    color: white;
+}
+"""
+
+
+class YeniSayfaDialogu(QDialog):
+    """
+    "+ Yeni Sayfa" butonuna basinca acilan KUCUK PENCERE (dialog).
+    Baslik + markdown icerik alir, backend'in POST /sources/markdown
+    endpoint'ine gonderir.
+
+    QDialog, QMainWindow'dan FARKLI - ana pencerenin USTUNE acilan,
+    kendi basina calisan gecici bir pencere icin kullanilir (formlar,
+    onay kutulari gibi).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Yeni Wiki Sayfasi Olustur")
+        self.resize(450, 420)
+
+        self.baslik_kutusu = QLineEdit()
+        self.baslik_kutusu.setPlaceholderText("Sayfa basligi")
+
+        self.icerik_kutusu = QTextEdit()
+        self.icerik_kutusu.setPlaceholderText("Buraya notunu yaz...")
+
+        # Kullaniciya format hakkinda kisa bir yardim notu - "markdown
+        # bilmiyorum, JSON formati nedir" tarzi kafa karisikligini
+        # onlemek icin. ONEMLI VURGU: hicbir ozel format ZORUNLU DEGIL,
+        # duz metin de yazilabilir - bolumlere ayirmak ISTERSE "#" ile
+        # baslik atabilir.
+        ipucu_etiketi = QLabel(
+            "İpucu: Normal bir not gibi yaz, özel bir format şart değil.\n"
+            "Bölümlere ayırmak istersen '# Bölüm Adı' yaz - # işaretinden\n"
+            "sonra MUTLAKA boşluk bırak, yoksa başlık olarak algılanmaz."
+        )
+        ipucu_etiketi.setProperty("ipucu", "true")
+        ipucu_etiketi.setWordWrap(True)
+
+        self.kaydet_butonu = QPushButton("Kaydet")
+        self.kaydet_butonu.clicked.connect(self.kaydet)
+
+        self.durum_etiketi = QLabel("")
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Baslik:"))
+        layout.addWidget(self.baslik_kutusu)
+        layout.addWidget(QLabel("Icerik:"))
+        layout.addWidget(ipucu_etiketi)
+        layout.addWidget(self.icerik_kutusu)
+        layout.addWidget(self.kaydet_butonu)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+    def kaydet(self):
+        """
+        Formdaki bilgileri POST /sources/markdown'a gonderir. Basarili
+        olursa dialogu KAPATIR (self.accept()) - bu, dialogu acan
+        pencereye "islem basariyla tamamlandi" sinyalini gonderir
+        (bkz. cagiran taraftaki "if dialog.exec():").
+        """
+        baslik = self.baslik_kutusu.text().strip()
+        icerik = self.icerik_kutusu.toPlainText().strip()
+
+        if not baslik or not icerik:
+            self.durum_etiketi.setText("Baslik ve icerik bos olamaz")
+            return
+
+        self.durum_etiketi.setText("Kaydediliyor...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.post(
+                f"{BACKEND_URL}/sources/markdown",
+                json={"title": baslik, "content": icerik},
+                timeout=15,
+            )
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        self.accept()
+
+
+class AramaSekmesi(QWidget):
+    """
+    "Ara" sekmesi: arama kutusu + sonuc listesi. GET /search'e baglanir.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.arama_kutusu = QLineEdit()
+        self.arama_kutusu.setPlaceholderText("Ne aramak istiyorsun? (orn. 'event loop nedir')")
+        self.arama_kutusu.returnPressed.connect(self.arama_yap)
+
+        self.ara_butonu = QPushButton("Ara")
+        self.ara_butonu.clicked.connect(self.arama_yap)
+
+        self.sonuc_listesi = QListWidget()
+
+        self.durum_etiketi = QLabel(
+            "Hazir - backend'in calistigindan emin ol (uvicorn main:app --reload)"
+        )
+
+        arama_satiri = QHBoxLayout()
+        arama_satiri.addWidget(self.arama_kutusu)
+        arama_satiri.addWidget(self.ara_butonu)
+
+        layout = QVBoxLayout()
+        layout.addLayout(arama_satiri)
+        layout.addWidget(self.sonuc_listesi)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+    def arama_yap(self):
+        """
+        NOT: Bu cagri SENKRON (requests.get bloklar) - istek surerken
+        pencere kisa bir sure "donmus" gorunur. Gercek/buyuk bir
+        uygulamada bu QThread ile arka planda yapilirdi ki arayuz hic
+        kilitlenmesin. Burada localhost'a giden istek zaten cok hizli
+        oldugu icin bu basitlik bilincli bir tercih.
+        """
+        sorgu = self.arama_kutusu.text().strip()
+        if not sorgu:
+            return
+
+        self.sonuc_listesi.clear()
+        self.durum_etiketi.setText("Araniyor...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.get(
+                f"{BACKEND_URL}/search",
+                params={"query": sorgu, "limit": 5},
+                timeout=5,
+            )
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText(
+                "Backend'e baglanilamadi - 'uvicorn main:app --reload' calisiyor mu?"
+            )
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        sonuclar = yanit.json()
+
+        if not sonuclar:
+            self.durum_etiketi.setText("Sonuc bulunamadi")
+            return
+
+        for sonuc in sonuclar:
+            baslik = sonuc["sayfa_basligi"]
+            icerik = sonuc["icerik"].strip().replace("\n", " ")
+            kisa_icerik = icerik[:150] + ("..." if len(icerik) > 150 else "")
+            bulunma = sonuc["bulunma_sekli"]
+
+            metin = f"[{bulunma}] {baslik}\n{kisa_icerik}"
+            self.sonuc_listesi.addItem(QListWidgetItem(metin))
+
+        self.durum_etiketi.setText(f"{len(sonuclar)} sonuc bulundu")
+
+
+class SayfalarSekmesi(QWidget):
+    """
+    "Sayfalar" sekmesi: var olan sayfalarin listesi + yonetim islemleri
+    (yeni sayfa, PDF yukleme, siniflandirma, silme). Ilgili endpoint'ler:
+    GET /pages, POST /sources/pdf, POST /pages/{id}/classify,
+    DELETE /pages/{id}.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.sayfa_listesi = QListWidget()
+
+        self.yenile_butonu = QPushButton("Yenile")
+        self.yenile_butonu.clicked.connect(self.sayfalari_yukle)
+
+        self.yeni_sayfa_butonu = QPushButton("+ Yeni Sayfa")
+        self.yeni_sayfa_butonu.clicked.connect(self.yeni_sayfa_ac)
+
+        self.pdf_yukle_butonu = QPushButton("PDF Yukle")
+        self.pdf_yukle_butonu.clicked.connect(self.pdf_yukle)
+
+        self.siniflandir_butonu = QPushButton("Siniflandir")
+        self.siniflandir_butonu.clicked.connect(self.secili_sayfayi_siniflandir)
+
+        self.sil_butonu = QPushButton("Sil")
+        self.sil_butonu.setObjectName("silButonu")  # QSS'te kirmizi renk icin
+        self.sil_butonu.clicked.connect(self.secili_sayfayi_sil)
+
+        self.durum_etiketi = QLabel("Sayfalari gormek icin 'Yenile'ye bas")
+
+        ust_satir = QHBoxLayout()
+        ust_satir.addWidget(self.yenile_butonu)
+        ust_satir.addWidget(self.yeni_sayfa_butonu)
+        ust_satir.addWidget(self.pdf_yukle_butonu)
+
+        alt_satir = QHBoxLayout()
+        alt_satir.addWidget(self.siniflandir_butonu)
+        alt_satir.addWidget(self.sil_butonu)
+
+        layout = QVBoxLayout()
+        layout.addLayout(ust_satir)
+        layout.addWidget(self.sayfa_listesi)
+        layout.addLayout(alt_satir)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+    def sayfalari_yukle(self):
+        self.durum_etiketi.setText("Yukleniyor...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.get(f"{BACKEND_URL}/pages", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        sayfalar = yanit.json()
+        self.sayfa_listesi.clear()
+
+        for sayfa in sayfalar:
+            kategori = sayfa.get("kategori") or "kategorisiz"
+            metin = f"#{sayfa['id']} - {sayfa['title']}  [{kategori}]"
+            oge = QListWidgetItem(metin)
+            # Gercek sayfa id'sini ogenin ICINE gomuyoruz (UserRole) -
+            # liste metnindeki "#id" yazisini geri PARSE etmek yerine,
+            # dogrudan veriden okumak cok daha guvenilir bir yontem.
+            oge.setData(Qt.ItemDataRole.UserRole, sayfa["id"])
+            self.sayfa_listesi.addItem(oge)
+
+        self.durum_etiketi.setText(f"{len(sayfalar)} sayfa yuklendi")
+
+    def _secili_sayfa_id(self):
+        oge = self.sayfa_listesi.currentItem()
+        if oge is None:
+            self.durum_etiketi.setText("Once listeden bir sayfa sec")
+            return None
+        return oge.data(Qt.ItemDataRole.UserRole)
+
+    def secili_sayfayi_siniflandir(self):
+        sayfa_id = self._secili_sayfa_id()
+        if sayfa_id is None:
+            return
+
+        self.durum_etiketi.setText("Siniflandiriliyor (LLM cagrisi, birkac saniye surebilir)...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.post(f"{BACKEND_URL}/pages/{sayfa_id}/classify", timeout=30)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        sonuc = yanit.json()
+        self.durum_etiketi.setText(f"Siniflandirildi: {sonuc['kategori']}")
+        self.sayfalari_yukle()  # listeyi yenile ki yeni kategori gorulsun
+
+    def secili_sayfayi_sil(self):
+        sayfa_id = self._secili_sayfa_id()
+        if sayfa_id is None:
+            return
+
+        # QMessageBox.question: kullaniciya "Evet/Hayir" sorusu soran
+        # hazir bir onay penceresi - GERI ALINAMAZ islemlerden once
+        # (silme gibi) kullanici onayı almak iyi bir pratik.
+        onay = QMessageBox.question(
+            self,
+            "Sayfayi Sil",
+            f"#{sayfa_id} numarali sayfayi silmek istedigine emin misin?\nBu islem geri alinamaz.",
+        )
+        if onay != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            yanit = requests.delete(f"{BACKEND_URL}/pages/{sayfa_id}", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        self.durum_etiketi.setText(f"#{sayfa_id} silindi")
+        self.sayfalari_yukle()
+
+    def yeni_sayfa_ac(self):
+        dialog = YeniSayfaDialogu(self)
+        if dialog.exec():
+            self.durum_etiketi.setText(f"'{dialog.baslik_kutusu.text()}' olusturuldu")
+            self.sayfalari_yukle()
+
+    def pdf_yukle(self):
+        """
+        QFileDialog.getOpenFileName: isletim sisteminin KENDI dosya
+        secme penceresini acar (Windows Gezgini gibi). Kullanici bir
+        PDF secince, dosyayi POST /sources/pdf'e MULTIPART FORM olarak
+        (dosya icerigiyle birlikte) yolluyoruz.
+        """
+        dosya_yolu, _ = QFileDialog.getOpenFileName(self, "PDF Sec", "", "PDF Dosyalari (*.pdf)")
+        if not dosya_yolu:
+            return  # kullanici pencereyi iptal etti
+
+        self.durum_etiketi.setText("Yukleniyor (buyuk PDF'lerde biraz surebilir)...")
+        QApplication.processEvents()
+
+        try:
+            with open(dosya_yolu, "rb") as dosya:
+                dosya_adi = os.path.basename(dosya_yolu)
+                yanit = requests.post(
+                    f"{BACKEND_URL}/sources/pdf",
+                    files={"dosya": (dosya_adi, dosya, "application/pdf")},
+                    timeout=120,
+                )
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        self.durum_etiketi.setText("PDF basariyla yuklendi")
+        self.sayfalari_yukle()
+
+
+class AnaPencere(QMainWindow):
+    """
+    Uygulamanin ANA penceresi. Icerigi bir QTabWidget (sekmeler) -
+    "Ara" ve "Sayfalar" - olusturuyor, her sekme kendi widget class'inda
+    (AramaSekmesi, SayfalarSekmesi) yasiyor.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("PersonalWiki AI - Masaustu Demo")
+        self.resize(750, 600)
+
+        baslik_etiketi = QLabel("PersonalWiki AI")
+        baslik_etiketi.setStyleSheet("font-size: 20px; font-weight: 700; color: #03045E;")
+
+        sekmeler = QTabWidget()
+        sekmeler.addTab(AramaSekmesi(), "Ara")
+        sekmeler.addTab(SayfalarSekmesi(), "Sayfalar")
+
+        ana_layout = QVBoxLayout()
+        ana_layout.addWidget(baslik_etiketi)
+        ana_layout.addWidget(sekmeler)
+
+        # QMainWindow'a DOGRUDAN layout eklenemez - once bir QWidget'a
+        # sarmalayip, o widget'i "merkez widget" olarak atamamiz gerekir.
+        merkez_widget = QWidget()
+        merkez_widget.setLayout(ana_layout)
+        self.setCentralWidget(merkez_widget)
+
+
+def main():
+    uygulama = QApplication(sys.argv)
+    uygulama.setStyleSheet(DENIZ_MAVISI_STIL)
+    pencere = AnaPencere()
+    pencere.show()
+    sys.exit(uygulama.exec())
+
+
+if __name__ == "__main__":
+    main()
