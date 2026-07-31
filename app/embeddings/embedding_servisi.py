@@ -36,6 +36,16 @@ _kavram_koleksiyonu = _chroma_client.get_or_create_collection(
     metadata={"hnsw:space": "cosine"},
 )
 
+def token_sayisi(metin: str) -> int:
+    """
+    Verilen metnin, embedding modelinin GERCEK tokenizer'iyla kac token
+    oldugunu sayar. structural_parser.parcalari_boyuta_gore_bol'a
+    "token_sayan_fonksiyon" olarak verilmek uzere - o dosya bu modele
+    dogrudan bagimli olmak istemedigi icin, gercek sayim burada yasiyor.
+    """
+    return len(_model.tokenizer.encode(metin))
+
+
 def parcayi_kaydet(unit_id: int, page_id: int, icerik: str):
     """
     Bir SemanticUnit'in icerigini vektore cevirir ve Chroma'ya kaydeder.

@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import veritabani_oturumu_getir
 from app.models.db_models import WikiPage,Source,SemanticUnit
 from app.models.schemas import MarkdownEkle, WikipageCevap
-from app.embeddings.embedding_servisi import parcayi_kaydet
+from app.embeddings.embedding_servisi import parcayi_kaydet, token_sayisi
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from app.connectors.pdf_connector import pdf_metnini_cikar
 from app.connectors.markdown_connector import markdown_metnini_cikar
+from app.services.structural_parser import parcalari_boyuta_gore_bol
 # prefix="/sources" -> bu router'daki her endpoint otomatik olarak
 # /sources ile baslar. tags=[...] ise sadece /docs sayfasinda
 # endpoint'lerin hangi baslik altinda gruplanacagini belirler.
@@ -34,6 +35,10 @@ async def markdown_ekle(istek: MarkdownEkle, db :AsyncSession = Depends(veritaba
     # 1) Icerigi baslik/bolum bazinda parcalara ayir - pdf_ekle'deki
     #    pdf_metnini_cikar'in dosyasiz karsiligi.
     parcalar = markdown_metnini_cikar(istek.content)
+
+    # 1.5) Bir baslik altindaki metin embedding modelinin token sinirini
+    #    asarsa sessizce kirpilir - asan parcalari kucuk alt-parcalara bol.
+    parcalar = parcalari_boyuta_gore_bol(parcalar, token_sayisi)
 
     # 2) WikiPage'i olustur.
     yeni_sayfa = WikiPage(title=istek.title, content=istek.content, tags=istek.tags)
@@ -123,6 +128,10 @@ async def pdf_ekle(
             status_code=422,
             detail="PDF'ten metin cikarilamadi - dosya bos veya sadece goruntuden olusuyor olabilir (OCR gerektirebilir)"
         )
+
+    # 4.5) Bir baslik altindaki metin embedding modelinin token sinirini
+    #    asarsa sessizce kirpilir - asan parcalari kucuk alt-parcalara bol.
+    parcalar = parcalari_boyuta_gore_bol(parcalar, token_sayisi)
 
     # 5) WikiPage.content icin TUM sayfalarin metnini birlestiriyoruz -
     #    boylece sayfa hala "tam metnine" sahip oluyor, sadece

@@ -21,8 +21,8 @@ from app.models.db_models import (
     ConceptRelation,
     KavramGorulme
 )
-from app.services.structural_parser import markdown_bol
-from app.embeddings.embedding_servisi import parcayi_kaydet, parcalari_sil, kavram_sil
+from app.services.structural_parser import markdown_bol, parcalari_boyuta_gore_bol
+from app.embeddings.embedding_servisi import parcayi_kaydet, parcalari_sil, kavram_sil, token_sayisi
 
 router = APIRouter(prefix="/pages", tags=["Sayfalar"])
 
@@ -62,6 +62,12 @@ async def sayfayi_indexle(
     """
     Bir WikiPage'in icerigini parcalara boler ve her parcayi
     SemanticUnit olarak veritabanina kaydeder.
+
+    Sayfa ZATEN indexliyse (var olan SemanticUnit'leri varsa) 409 doner -
+    tekrar cagirmak, WikiPage.content'in (basliklari icermeyen, duz
+    birlestirilmis metin) tekrar bolunmesine yol acar; bu da TUM
+    icerigin tek bir dev "Giris" parcasina dusmesine sebep olur (PDF/
+    markdown kaynaklarinda zaten upload sirasinda otomatik indexleniyor).
     """
     sonuc = await db.execute(select(WikiPage).where(WikiPage.id == sayfa_id))
     sayfa = sonuc.scalars().first()
@@ -69,7 +75,20 @@ async def sayfayi_indexle(
     if sayfa is None:
         raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
 
+    var_olan_sonuc = await db.execute(
+        select(SemanticUnit.id).where(SemanticUnit.page_id == sayfa_id).limit(1)
+    )
+    if var_olan_sonuc.scalars().first() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Bu sayfa zaten indexlenmis - tekrar indexlemek yinelenen/bozuk parcalar olusturur"
+        )
+
     parcalar = markdown_bol(sayfa.content)
+
+    # Bir baslik altindaki metin embedding modelinin token sinirini
+    # asarsa sessizce kirpilir - asan parcalari kucuk alt-parcalara bol.
+    parcalar = parcalari_boyuta_gore_bol(parcalar, token_sayisi)
 
     yeni_unitler = []
     for sira, parca in enumerate(parcalar):
