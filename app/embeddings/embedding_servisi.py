@@ -8,7 +8,17 @@ BU_DOSYANIN_KLASORU = os.path.dirname(os.path.abspath(__file__))
 CHROMA_VERI_YOLU = os.path.join(BU_DOSYANIN_KLASORU, "..", "..", "chroma_data")
 
 
-_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+# all-MiniLM-L6-v2 (eski model) Ingilizce agirlikli bir tokenizer'a
+# sahipti - Turkce'ye ozgu karakterleri (orn. noktasiz "i") iyi
+# tokenize edemiyordu. Test edildi: "sinav" kelimesi (ASCII, yanlis
+# yazim) 2 token'a bolunurken, dogru yazilmis "sinav" 4 parcaya
+# bolunuyordu - bu da Turkce sorgularda anlamli oranda dusuk benzerlik
+# skoruna (0.70 vs 0.78) yol aciyordu. paraphrase-multilingual-MiniLM-
+# L12-v2, coklu dilli egitim gordugu icin Turkce kelimeleri cok daha
+# iyi (genelde TEK token olarak) taniyor. Vektor boyutu AYNI (384),
+# Chroma semasi bozulmuyor - ama max_seq_length daha dusuk (128 vs 256,
+# bkz. structural_parser.py'deki maks_token varsayilani).
+_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2", local_files_only=True)
 
 # Chroma istemcisini olustur 
 _chroma_client = chromadb.PersistentClient(path=CHROMA_VERI_YOLU)

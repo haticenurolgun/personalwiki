@@ -15,7 +15,7 @@ from app.embeddings.embedding_servisi import parcayi_kaydet, token_sayisi
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from app.connectors.pdf_connector import pdf_metnini_cikar
 from app.connectors.markdown_connector import markdown_metnini_cikar
-from app.services.structural_parser import parcalari_boyuta_gore_bol
+from app.services.structural_parser import parcalari_boyuta_gore_bol, liste_maddelerine_gore_bol
 # prefix="/sources" -> bu router'daki her endpoint otomatik olarak
 # /sources ile baslar. tags=[...] ise sadece /docs sayfasinda
 # endpoint'lerin hangi baslik altinda gruplanacagini belirler.
@@ -35,6 +35,11 @@ async def markdown_ekle(istek: MarkdownEkle, db :AsyncSession = Depends(veritaba
     # 1) Icerigi baslik/bolum bazinda parcalara ayir - pdf_ekle'deki
     #    pdf_metnini_cikar'in dosyasiz karsiligi.
     parcalar = markdown_metnini_cikar(istek.content)
+
+    # 1.4) Bir bolum TAMAMEN bagimsiz liste maddelerinden olusuyorsa
+    #    (orn. bir sinav takvimi), her maddeyi ayri parca yap - yoksa
+    #    embedding birden fazla bagimsiz gercegi "sulandirir".
+    parcalar = liste_maddelerine_gore_bol(parcalar)
 
     # 1.5) Bir baslik altindaki metin embedding modelinin token sinirini
     #    asarsa sessizce kirpilir - asan parcalari kucuk alt-parcalara bol.
@@ -128,6 +133,11 @@ async def pdf_ekle(
             status_code=422,
             detail="PDF'ten metin cikarilamadi - dosya bos veya sadece goruntuden olusuyor olabilir (OCR gerektirebilir)"
         )
+
+    # 4.4) Bir bolum TAMAMEN bagimsiz liste maddelerinden olusuyorsa,
+    #    her maddeyi ayri parca yap - yoksa embedding birden fazla
+    #    bagimsiz gercegi "sulandirir".
+    parcalar = liste_maddelerine_gore_bol(parcalar)
 
     # 4.5) Bir baslik altindaki metin embedding modelinin token sinirini
     #    asarsa sessizce kirpilir - asan parcalari kucuk alt-parcalara bol.

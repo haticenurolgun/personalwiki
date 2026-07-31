@@ -82,7 +82,7 @@ def markdown_bol(content: str) -> list[MetinParcasi]:
 def parcalari_boyuta_gore_bol(
     parcalar: list[MetinParcasi],
     token_sayan_fonksiyon,
-    maks_token: int = 256,
+    maks_token: int = 128,  # paraphrase-multilingual-MiniLM-L12-v2'nin max_seq_length'i
 ) -> list[MetinParcasi]:
     """
     markdown_bol basliklara gore boler, ama bir baslik altindaki metin
@@ -167,5 +167,68 @@ def parcalari_boyuta_gore_bol(
                 biriken_paragraflar = aday
 
         alt_parcayi_kaydet()
+
+    return sonuc
+
+
+def _madde_satiri_mi(satir: str) -> bool:
+    """Bir satir "- ", "* " ile ya da "1. " gibi numarayla mi basliyor?"""
+    satir = satir.strip()
+    if satir.startswith("- ") or satir.startswith("* ") or satir in ("-", "*"):
+        return True
+    # "1. ", "12. " gibi numarali madde kontrolu.
+    nokta_index = satir.find(". ")
+    if nokta_index > 0 and satir[:nokta_index].isdigit():
+        return True
+    return False
+
+
+def liste_maddelerine_gore_bol(parcalar: list[MetinParcasi]) -> list[MetinParcasi]:
+    """
+    Bir bolumun ICERIGI TAMAMEN (satir satir hepsi) madde isaretli
+    satirlardan olusuyorsa VE en az 2 madde varsa, HER MADDEYI AYRI
+    bir MetinParcasi yapar - boylece bir parcanin embedding'i, birden
+    fazla BAGIMSIZ gercegi (orn. "15 Ocak - Elektronik Devreler
+    sinavi" gibi bir sinav takvimi maddesi) TEK VEKTORDE "sulandirip"
+    ortalamaya dusurmez.
+
+    NEDEN GEREKLI: gercek kullanimda test edilerek bulundu - 3 farkli
+    dersin sinav tarihini iceren TEK bir bolum, "elektronik devreler
+    sinavi" sorgusuna 0.42 kozinus benzerligi verirken, SADECE o
+    maddenin (satirin) embedding'i 0.60 benzerlik veriyordu.
+
+    NEDEN SADECE BOLUM TAMAMEN LISTE OLDUGUNDA BOLUYORUZ (duz metinle
+    KARISIK degilse ya da tek bir madde varsa BOLMUYORUZ): bir bolumde
+    "Faydalari:\n- Hiz\n- Guvenlik" gibi BIRBIRINE BAGLI alt-maddeler
+    de olabilir - bunlari ayirmak "Faydalari" baglamini KAYBETTIRIR,
+    madde tek basina anlamsiz kalabilir. Bu bir kesin cozum degil,
+    bilincli bir denge - cogunlukla dogru tarafta hata yapar (bagimsiz
+    gercekleri ayirmak, iliskili alt-maddeleri ayirmaktan daha sik
+    karsilasilan ve daha faydali bir durum).
+    """
+    sonuc: list[MetinParcasi] = []
+
+    for parca in parcalar:
+        satirlar = [s for s in parca.icerik.split("\n") if s.strip()]
+        madde_satirlari = [s for s in satirlar if _madde_satiri_mi(s)]
+
+        if len(satirlar) >= 2 and len(madde_satirlari) == len(satirlar):
+            for madde in madde_satirlari:
+                # Basindaki "- ", "* " ya da "1. " isaretini temizle -
+                # embedding'e giden metin gereksiz noktalama gurultusu
+                # tasimasin.
+                temiz_madde = madde.strip().lstrip("-*").strip()
+                if temiz_madde and temiz_madde[0].isdigit():
+                    nokta_index = temiz_madde.find(". ")
+                    if nokta_index > 0 and temiz_madde[:nokta_index].isdigit():
+                        temiz_madde = temiz_madde[nokta_index + 2:].strip()
+
+                sonuc.append(MetinParcasi(
+                    baslik=parca.baslik,
+                    icerik=temiz_madde,
+                    seviye=parca.seviye,
+                ))
+        else:
+            sonuc.append(parca)
 
     return sonuc
