@@ -48,6 +48,45 @@ class BatchCikarimSonucu:
 
 
 
+def _kavramlari_ayikla(ham_liste: list[dict]) -> list[CikarilanKavram]:
+    """
+    LLM'in dondurdugu ham kavram sozluklerini CikarilanKavram nesnelerine
+    cevirir. LLM bazen eksik alanli (orn. "tip" olmayan) bir kavram
+    uretebiliyor - boyle bir kavrami dogrudan ["isim"] ile okumaya
+    calismak KeyError'a (ve tum cikarimin cokmesine) yol acar, bu yuzden
+    eksik alanli kavramlari sessizce ATLIYORUZ.
+    """
+    sonuc = []
+    for k in ham_liste:
+        if "isim" not in k or "tip" not in k:
+            continue
+        sonuc.append(CikarilanKavram(
+            isim=k["isim"],
+            tip=k["tip"],
+            takma_adlar=k.get("takma_adlar", []),
+        ))
+    return sonuc
+
+
+def _iliskileri_ayikla(ham_liste: list[dict]) -> list[CikarilanIliski]:
+    """
+    _kavramlari_ayikla ile AYNI mantik, iliskiler icin. Gercekte
+    yasandi: LLM buyuk bir batch cagrisinda bir iliski icin "hedef_isim"
+    alanini unuttu, dogrudan i["hedef_isim"] erisimi KeyError firlatip
+    o sayfanin TUM kavram cikarimini cokertti.
+    """
+    sonuc = []
+    for i in ham_liste:
+        if "kaynak_isim" not in i or "hedef_isim" not in i or "iliski_tipi" not in i:
+            continue
+        sonuc.append(CikarilanIliski(
+            kaynak_isim=i["kaynak_isim"],
+            hedef_isim=i["hedef_isim"],
+            iliski_tipi=i["iliski_tipi"],
+        ))
+    return sonuc
+
+
 def kavram_cikar(metin: str) -> CikarimSonucu:
     """
     Verilen metinden, ontolojiye uygun kavram ve iliskileri LLM ile
@@ -108,23 +147,8 @@ def kavram_cikar(metin: str) -> CikarimSonucu:
         # bos bir sonuc donuyoruz, tum islemi cokertmek yerine.
         return CikarimSonucu(kavramlar=[], iliskiler=[])
 
-    kavramlar = [
-        CikarilanKavram(
-            isim=k["isim"],
-            tip=k["tip"],
-            takma_adlar=k.get("takma_adlar", []),
-        )
-        for k in veri.get("kavramlar", [])
-    ]
-
-    iliskiler = [
-        CikarilanIliski(
-            kaynak_isim=i["kaynak_isim"],
-            hedef_isim=i["hedef_isim"],
-            iliski_tipi=i["iliski_tipi"],
-        )
-        for i in veri.get("iliskiler", [])
-    ]
+    kavramlar = _kavramlari_ayikla(veri.get("kavramlar", []))
+    iliskiler = _iliskileri_ayikla(veri.get("iliskiler", []))
 
     return CikarimSonucu(kavramlar=kavramlar, iliskiler=iliskiler)
 
@@ -241,23 +265,8 @@ def kavram_cikar_batch(metinler: dict[int, str]) -> BatchCikarimSonucu:
 
         ilgili_unit_id = unit_id_listesi[metin_no - 1]
 
-        kavramlar = [
-            CikarilanKavram(
-                isim=k["isim"],
-                tip=k["tip"],
-                takma_adlar=k.get("takma_adlar", []),
-            )
-            for k in sonuc_item.get("kavramlar", [])
-        ]
-
-        iliskiler = [
-            CikarilanIliski(
-                kaynak_isim=i["kaynak_isim"],
-                hedef_isim=i["hedef_isim"],
-                iliski_tipi=i["iliski_tipi"],
-            )
-            for i in sonuc_item.get("iliskiler", [])
-        ]
+        kavramlar = _kavramlari_ayikla(sonuc_item.get("kavramlar", []))
+        iliskiler = _iliskileri_ayikla(sonuc_item.get("iliskiler", []))
 
         unit_sonuclari[ilgili_unit_id] = CikarimSonucu(kavramlar=kavramlar, iliskiler=iliskiler)
 
