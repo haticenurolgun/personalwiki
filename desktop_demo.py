@@ -608,8 +608,13 @@ class AramaSekmesi(QWidget):
             icerik = sonuc["icerik"].strip().replace("\n", " ")
             kisa_icerik = icerik[:150] + ("..." if len(icerik) > 150 else "")
             bulunma = sonuc["bulunma_sekli"]
+            # "embedding" disindaki sonuclarda bu GERCEK bir kozinus
+            # uzakligi degil, sabit bir yer tutucudur (bkz.
+            # AramaSonucu.benzerlik_uzakligi docstring'i) - ama yine de
+            # gosteriyoruz, [bulunma] etiketi zaten bunu ayirt ediyor.
+            mesafe = sonuc["benzerlik_uzakligi"]
 
-            metin = f"[{bulunma}] {baslik}\n{kisa_icerik}"
+            metin = f"[{bulunma}] mesafe: {mesafe:.4f} | {baslik}\n{kisa_icerik}"
             self.sonuc_listesi.addItem(QListWidgetItem(metin))
 
         self.durum_etiketi.setText(f"{len(sonuclar)} sonuc bulundu")
