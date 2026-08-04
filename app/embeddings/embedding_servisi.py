@@ -54,8 +54,8 @@ def token_sayisi(metin: str) -> int:
     """
     Verilen metnin, embedding modelinin GERCEK tokenizer'iyla kac token
     oldugunu sayar. structural_parser.parcalari_boyuta_gore_bol'a
-    "token_sayan_fonksiyon" olarak verilmek uzere - o dosya bu modele
-    dogrudan bagimli olmak istemedigi icin, gercek sayim burada yasiyor.
+    "token_sayici" olarak verilmek uzere - o dosya bu modele dogrudan
+    bagimli olmak istemedigi icin, gercek sayim burada yasiyor.
     """
     return len(_model.tokenizer.encode(metin))
 
@@ -271,3 +271,22 @@ def benzer_parcalari_bul(sorgu: str, sonuc_sayisi: int = 5) -> list[dict]:
             })
 
         return bulunan_parcalar
+
+
+def cumle_benzerlik_vektorleri(cumleler: list[str]) -> np.ndarray:
+    """
+    Verilen cumle listesini, ANLAMSAL BENZERLIK (retrieval degil)
+    gorevi icin embedding vektorlerine cevirir - chunking_secici.py'deki
+    "semantik" bolme yontemi, ardisik cumleler arasindaki kozinus
+    uzakligina bakarak konu degisimini tespit etmek icin bunu kullanir.
+
+    prompt_name="STS" (en_benzer_konuyu_bul'daki ile ayni gorev):
+    burada bir sorgu/dokuman ayrimi yok, iki metnin ANLAMCA ne kadar
+    benzer oldugunu olcuyoruz - EmbeddingGemma'nin bu gorev icin
+    onerdigi prompt bu.
+
+    Donen vektorler birim vektor (unit vector) oldugu icin, iki vektor
+    arasindaki ic carpim (np.dot) DOGRUDAN kozinus benzerligine esittir
+    (bkz. en_benzer_konuyu_bul'daki ayni yorum).
+    """
+    return _model.encode(cumleler, prompt_name="STS")

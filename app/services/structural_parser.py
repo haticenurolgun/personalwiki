@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class MetinParcasi:
+class Parca:
     """
     Bolme isleminden cikan TEK BIR parcayi temsil eder.
     dataclass, bize otomatik olarak __init__ (kurucu fonksiyon) ve
@@ -23,67 +23,67 @@ class MetinParcasi:
     seviye: int       # baslik seviyesi (1 = #, 2 = ##, 3 = ###)
 
 
-def markdown_bol(content: str) -> list[MetinParcasi]:
+def markdown_bol(content: str) -> list[Parca]:
     """
     Markdown metnini # basliklarina gore parcalara boler.
 
     Ornek:
         "# Baslik\nmetin\n## Alt baslik\nmetin2"
-        -> [MetinParcasi(baslik="Baslik", icerik="metin", seviye=1),
-            MetinParcasi(baslik="Alt baslik", icerik="metin2", seviye=2)]
+        -> [Parca(baslik="Baslik", icerik="metin", seviye=1),
+            Parca(baslik="Alt baslik", icerik="metin2", seviye=2)]
     """
-    parcalar: list[MetinParcasi] = []
+    parcalar: list[Parca] = []
     satirlar = content.split("\n")
 
-    su_anki_baslik = "Giris"   # hic baslik yoksa varsayilan bolum adi
-    su_anki_seviye = 0
-    su_anki_icerik: list[str] = []   # su an topladigimiz ham satirlar
+    baslik = "Giris"   # hic baslik yoksa varsayilan bolum adi
+    seviye_gecici = 0
+    icerik: list[str] = []   # su an topladigimiz ham satirlar
 
     for satir in satirlar:
         if satir.startswith("#"):
             # 1) Yeni bir basliga geciyoruz. Ama once, bir onceki
             #    baslik altinda biriktirdigimiz icerik varsa, onu
-            #    KAYBETMEDEN bir MetinParcasi olarak kaydedelim.
-            if su_anki_icerik:
-                parcalar.append(MetinParcasi(
-                    baslik=su_anki_baslik,
-                    icerik="\n".join(su_anki_icerik),
-                    seviye=su_anki_seviye,
+            #    KAYBETMEDEN bir Parca olarak kaydedelim.
+            if icerik:
+                parcalar.append(Parca(
+                    baslik=baslik,
+                    icerik="\n".join(icerik),
+                    seviye=seviye_gecici,
                 ))
 
             # 2) Yeni basligin seviyesini say (kac tane # var).
             #    "## 1NF" -> len("## 1NF")=6, len(" 1NF")=4, fark=2
-            su_anki_seviye = len(satir) - len(satir.lstrip("#"))
+            seviye_gecici = len(satir) - len(satir.lstrip("#"))
 
             # 3) Yeni basligin metnini cikar (# isaretlerini ve
             #    bosluklari temizleyerek).
-            su_anki_baslik = satir.lstrip("#").strip()
+            baslik = satir.lstrip("#").strip()
 
             # 4) Yeni bolum icin icerik listesini sifirla.
-            su_anki_icerik = []
+            icerik = []
         else:
             # Baslik degil, normal bir metin satiri -> biriktir.
-            su_anki_icerik.append(satir)
+            icerik.append(satir)
 
     # Dongu bitti. Ama metnin EN SON bolumu hala kaydedilmedi, cunku
     # kaydetme islemi sadece "yeni bir baslik gorunce" tetikleniyordu.
     # Son bolumun ardindan yeni bir baslik gelmedigi icin, bunu
     # dongu disinda bir kere daha elle yapmamiz lazim.
-    if su_anki_icerik:
-        parcalar.append(MetinParcasi(
-            baslik=su_anki_baslik,
-            icerik="\n".join(su_anki_icerik),
-            seviye=su_anki_seviye,
+    if icerik:
+        parcalar.append(Parca(
+            baslik=baslik,
+            icerik="\n".join(icerik),
+            seviye=seviye_gecici,
         ))
 
     return parcalar
 
 
 def parcalari_boyuta_gore_bol(
-    parcalar: list[MetinParcasi],
-    token_sayan_fonksiyon,
-    maks_token: int = 128,  # paraphrase-multilingual-MiniLM-L12-v2'nin max_seq_length'i
-) -> list[MetinParcasi]:
+    parcalar: list[Parca],
+    token_sayici,
+    maks_token: int = 1800,  # EmbeddingGemma-300M'in max_seq_length'i (2048) icin guvenlik payi birakiyor - bkz. embedding_servisi.py
+) -> list[Parca]:
     """
     markdown_bol basliklara gore boler, ama bir baslik altindaki metin
     yine de COK UZUN olabilir (orn. 3000 token) - embedding modelinin
@@ -92,11 +92,11 @@ def parcalari_boyuta_gore_bol(
     sinirlarindan bolerek kucuk alt-parcalara ayirir - boylece hicbir
     icerik embedding'e girmeden kaybolmaz.
 
-    token_sayan_fonksiyon: bir metin alip token sayisini donduren
-    fonksiyon. Bu fonksiyonun DISARIDAN parametre olarak verilmesinin
-    sebebi: bu dosya (structural_parser.py) veritabani/model gibi agir
+    token_sayici: bir metin alip token sayisini donduren fonksiyon. Bu
+    fonksiyonun DISARIDAN parametre olarak verilmesinin sebebi: bu
+    dosya (structural_parser.py) veritabani/model gibi agir
     bagimliliklardan TAMAMEN bagimsiz kalsin istiyoruz (dosyanin en
-    basindaki kural) - gercek token sayimi (BERT tokenizer) embedding_
+    basindaki kural) - gercek token sayimi (gercek tokenizer) embedding_
     servisi.py'de yasiyor, oraya bagimli olmadan burada test edilebiliriz
     (basit bir "len(metin.split())" ile bile test yazilabilir).
 
@@ -104,10 +104,10 @@ def parcalari_boyuta_gore_bol(
     parcalarin baslik/seviye'si, ait olduklari orijinal parcayla AYNI -
     boylece arama sonucunda hala "hangi baslik altinda" bilgisi kalir.
     """
-    sonuc: list[MetinParcasi] = []
+    sonuc: list[Parca] = []
 
     for parca in parcalar:
-        if token_sayan_fonksiyon(parca.icerik) <= maks_token:
+        if token_sayici(parca.icerik) <= maks_token:
             sonuc.append(parca)
             continue
 
@@ -118,71 +118,71 @@ def parcalari_boyuta_gore_bol(
         # yapabiliriz. Eger dogrudan sonuc'a eklesek, bu parcanin son
         # (kucuk) alt-parcasi YANLISLIKLA bir SONRAKI, TAMAMEN FARKLI
         # bolumun/liste maddesinin ilk parcasiyla birlesebilirdi.
-        parca_sonuclari: list[MetinParcasi] = []
+        parca_sonuclari: list[Parca] = []
 
         # Once paragraf sinirlarindan (bos satir) parcala.
         paragraflar = [p for p in parca.icerik.split("\n\n") if p.strip()]
 
-        biriken_paragraflar: list[str] = []
+        paragraf_grubu: list[str] = []
 
         def alt_parcayi_kaydet():
-            if biriken_paragraflar:
-                parca_sonuclari.append(MetinParcasi(
+            if paragraf_grubu:
+                parca_sonuclari.append(Parca(
                     baslik=parca.baslik,
-                    icerik="\n\n".join(biriken_paragraflar),
+                    icerik="\n\n".join(paragraf_grubu),
                     seviye=parca.seviye,
                 ))
 
         for paragraf in paragraflar:
-            if token_sayan_fonksiyon(paragraf) > maks_token:
+            if token_sayici(paragraf) > maks_token:
                 # Tek bir paragraf bile sinirin uzerinde - once o ana
                 # kadar biriken paragraflari kaydet, sonra bu paragrafi
                 # kelime kelime, GERCEK token sayisini olcerek zorla
                 # parcala. Sabit bir "kac kelime = kac token" tahmini
                 # GUVENILMEZ - Turkce'de kimi kelimeler (orn. uzun
-                # bilesik/eklemeli kelimeler) BERT tokenizer'da tek
-                # basina 3-4 token'a bolunebiliyor, bu yuzden her adimda
+                # bilesik/eklemeli kelimeler) tokenizer'da tek basina
+                # 3-4 token'a bolunebiliyor, bu yuzden her adimda
                 # gercekten olcuyoruz (tahmin etmiyoruz).
                 alt_parcayi_kaydet()
-                biriken_paragraflar = []
+                paragraf_grubu = []
 
-                biriken_kelimeler: list[str] = []
+                kelime_grubu: list[str] = []
                 for kelime in paragraf.split():
-                    aday_kelimeler = biriken_kelimeler + [kelime]
-                    if token_sayan_fonksiyon(" ".join(aday_kelimeler)) > maks_token:
-                        if biriken_kelimeler:
-                            parca_sonuclari.append(MetinParcasi(
+                    aday_kelimeler = kelime_grubu + [kelime]
+                    if token_sayici(" ".join(aday_kelimeler)) > maks_token:
+                        if kelime_grubu:
+                            parca_sonuclari.append(Parca(
                                 baslik=parca.baslik,
-                                icerik=" ".join(biriken_kelimeler),
+                                icerik=" ".join(kelime_grubu),
                                 seviye=parca.seviye,
                             ))
-                        biriken_kelimeler = [kelime]
+                        kelime_grubu = [kelime]
                     else:
-                        biriken_kelimeler = aday_kelimeler
+                        kelime_grubu = aday_kelimeler
 
-                if biriken_kelimeler:
-                    parca_sonuclari.append(MetinParcasi(
+                if kelime_grubu:
+                    parca_sonuclari.append(Parca(
                         baslik=parca.baslik,
-                        icerik=" ".join(biriken_kelimeler),
+                        icerik=" ".join(kelime_grubu),
                         seviye=parca.seviye,
                     ))
                 continue
 
-            aday = biriken_paragraflar + [paragraf]
-            if token_sayan_fonksiyon("\n\n".join(aday)) > maks_token:
+            aday = paragraf_grubu + [paragraf]
+            if token_sayici("\n\n".join(aday)) > maks_token:
                 alt_parcayi_kaydet()
-                biriken_paragraflar = [paragraf]
+                paragraf_grubu = [paragraf]
             else:
-                biriken_paragraflar = aday
+                paragraf_grubu = aday
 
         alt_parcayi_kaydet()
 
         # Cok kucuk kalan artik alt-parcalari (orn. bir paragrafin/
         # kelime dizisinin en sonunda kalan bir kac kelimelik kalinti),
-        # hemen ONCEKI alt-parcayla BIRLESTIR - bkz. _kucuk_artiklari_
+        # hemen ONCEKI alt-parcayla BIRLESTIR - bkz. _kucuk_parcalari_
         # birlestir docstring'i. Sadece bu TEK parcanin alt-parcalari
         # arasinda calisiyor, farkli bolum/liste maddeleriyle karismaz.
-        sonuc.extend(_kucuk_artiklari_birlestir(parca_sonuclari, token_sayan_fonksiyon))
+        sonuc.extend(_kucuk_parcalari_birlestir(parca_sonuclari, token_sayici))
 
     return sonuc
 
@@ -198,7 +198,7 @@ def parcalari_boyuta_gore_bol(
 MIN_PARCA_TOKEN = 20
 
 
-def _kucuk_artiklari_birlestir(parcalar: list[MetinParcasi], token_sayan_fonksiyon) -> list[MetinParcasi]:
+def _kucuk_parcalari_birlestir(parcalar: list[Parca], token_sayici) -> list[Parca]:
     """
     Ardisik alt-parcalar arasinda MIN_PARCA_TOKEN'dan kucuk olanlari,
     bir ONCEKI alt-parcayla birlestirir. SADECE parcalari_boyuta_gore_
@@ -216,9 +216,9 @@ def _kucuk_artiklari_birlestir(parcalar: list[MetinParcasi], token_sayan_fonksiy
 
     sonuc = [parcalar[0]]
     for parca in parcalar[1:]:
-        if token_sayan_fonksiyon(parca.icerik) < MIN_PARCA_TOKEN:
+        if token_sayici(parca.icerik) < MIN_PARCA_TOKEN:
             onceki = sonuc[-1]
-            sonuc[-1] = MetinParcasi(
+            sonuc[-1] = Parca(
                 baslik=onceki.baslik,
                 icerik=onceki.icerik + "\n\n" + parca.icerik,
                 seviye=onceki.seviye,
@@ -229,7 +229,7 @@ def _kucuk_artiklari_birlestir(parcalar: list[MetinParcasi], token_sayan_fonksiy
     return sonuc
 
 
-def _madde_satiri_mi(satir: str) -> bool:
+def _madde_mi(satir: str) -> bool:
     """Bir satir "- ", "* " ile ya da "1. " gibi numarayla mi basliyor?"""
     satir = satir.strip()
     if satir.startswith("- ") or satir.startswith("* ") or satir in ("-", "*"):
@@ -241,13 +241,13 @@ def _madde_satiri_mi(satir: str) -> bool:
     return False
 
 
-def liste_maddelerine_gore_bol(parcalar: list[MetinParcasi]) -> list[MetinParcasi]:
+def liste_maddelerine_gore_bol(parcalar: list[Parca]) -> list[Parca]:
     """
     Bir bolumun ICERIGI TAMAMEN (satir satir hepsi) madde isaretli
     satirlardan olusuyorsa VE en az 2 madde varsa, HER MADDEYI AYRI
-    bir MetinParcasi yapar - boylece bir parcanin embedding'i, birden
-    fazla BAGIMSIZ gercegi (orn. "15 Ocak - Elektronik Devreler
-    sinavi" gibi bir sinav takvimi maddesi) TEK VEKTORDE "sulandirip"
+    bir Parca yapar - boylece bir parcanin embedding'i, birden fazla
+    BAGIMSIZ gercegi (orn. "15 Ocak - Elektronik Devreler sinavi"
+    gibi bir sinav takvimi maddesi) TEK VEKTORDE "sulandirip"
     ortalamaya dusurmez.
 
     NEDEN GEREKLI: gercek kullanimda test edilerek bulundu - 3 farkli
@@ -264,11 +264,11 @@ def liste_maddelerine_gore_bol(parcalar: list[MetinParcasi]) -> list[MetinParcas
     gercekleri ayirmak, iliskili alt-maddeleri ayirmaktan daha sik
     karsilasilan ve daha faydali bir durum).
     """
-    sonuc: list[MetinParcasi] = []
+    sonuc: list[Parca] = []
 
     for parca in parcalar:
         satirlar = [s for s in parca.icerik.split("\n") if s.strip()]
-        madde_satirlari = [s for s in satirlar if _madde_satiri_mi(s)]
+        madde_satirlari = [s for s in satirlar if _madde_mi(s)]
 
         if len(satirlar) >= 2 and len(madde_satirlari) == len(satirlar):
             for madde in madde_satirlari:
@@ -281,7 +281,7 @@ def liste_maddelerine_gore_bol(parcalar: list[MetinParcasi]) -> list[MetinParcas
                     if nokta_index > 0 and temiz_madde[:nokta_index].isdigit():
                         temiz_madde = temiz_madde[nokta_index + 2:].strip()
 
-                sonuc.append(MetinParcasi(
+                sonuc.append(Parca(
                     baslik=parca.baslik,
                     icerik=temiz_madde,
                     seviye=parca.seviye,
@@ -292,18 +292,17 @@ def liste_maddelerine_gore_bol(parcalar: list[MetinParcasi]) -> list[MetinParcas
     return sonuc
 
 
-def bos_parcalari_temizle(parcalar: list[MetinParcasi]) -> list[MetinParcasi]:
+def bos_parcalari_temizle(parcalar: list[Parca]) -> list[Parca]:
     """
     Icerigi BOS (ya da sadece bosluk) olan parcalari eler.
 
     NEDEN GEREKLI: bir baslik, hemen ardindan baska bir baslik
     geliyorsa (aralarinda govde metni yoksa - orn. "# Baslik\n##
     Alt Baslik") markdown_bol, "Baslik" icin BOS icerikli bir
-    MetinParcasi uretir. Boyle bir parca SemanticUnit olarak
-    kaydedilip embed edilirse (BOS bir metnin embedding'i!), LLM'e
-    "hicbir bilgi tasimayan" bir "kaynak" olarak sunulur - arama/
-    sohbet baglamini gereksiz yere kalabaliklastirir, gercek bilgiyi
-    "sulandirir". Gercek kullanimda bulundu: 452 unit'in 51'i (%11)
-    bos cikmisti.
+    Parca uretir. Boyle bir parca SemanticUnit olarak kaydedilip
+    embed edilirse (BOS bir metnin embedding'i!), LLM'e "hicbir bilgi
+    tasimayan" bir "kaynak" olarak sunulur - arama/sohbet baglamini
+    gereksiz yere kalabaliklastirir, gercek bilgiyi "sulandirir".
+    Gercek kullanimda bulundu: 452 unit'in 51'i (%11) bos cikmisti.
     """
     return [parca for parca in parcalar if parca.icerik.strip()]

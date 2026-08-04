@@ -20,15 +20,20 @@ bir sinir degil. Projenin hedefi PDF'in birebir kopyasini tutmak
 degil, ana fikir/kavramlari yakalamak oldugu icin, GERCEK baslik/
 bolum sinirlarina gore bolmek cok daha dogru bir yaklasim.
 
+NEDEN BURADA HIC BOLME YOK (markdown_bol BURADA CAGRILMIYOR): bu
+dosya sadece HAM markdown METNINI dondurur - PDF'i nasil parcalara
+bolecegini (hangi chunking yontemunu kullanacagini) chunking_secici.py
+karar veriyor. Boylece PDF'ten gelen ve elle yazilmis markdown'dan
+gelen icerik AYNI, TEK secim pipeline'indan geciyor - PDF'e ozel
+ayri bir bolme mantigi olmuyor.
+
 ONEMLI KURAL: bu dosya veritabanina HICBIR SEY yazmaz. Sadece bir
-dosya yolu alir, parcalanmis metin listesi dondurur.
+dosya yolu alir, ham markdown metni dondurur.
 """
 
 from collections import Counter
 
 import pymupdf4llm
-
-from app.services.structural_parser import MetinParcasi, markdown_bol
 
 # Bir satirin "tekrar eden header/footer" sayilmasi icin, PDF'teki
 # SAYFALARIN en az bu ORANI kadarinda (birebir ayni sekilde) gecmesi
@@ -79,25 +84,22 @@ def _tekrar_eden_satirlari_bul(sayfa_metinleri: list[str]) -> set[str]:
     }
 
 
-def pdf_metnini_cikar(dosya_yolu: str) -> list[MetinParcasi]:
+def pdf_metnini_cikar(dosya_yolu: str) -> str:
     """
-    PDF'i pymupdf4llm ile GERCEK basliklara ayrilmis markdown'a
-    cevirir, sonra structural_parser.markdown_bol ile bu markdown'i
-    baslik/bolum bazinda MetinParcasi listesine ceviren fonksiyonu
-    kullanir. Tablo/gorsel dogrulugu ONEMSENMIYOR - sadece baslik
-    yapisi cikarmak yeterli.
+    PDF'i pymupdf4llm ile GERCEK basliklara ayrilmis markdown METNINE
+    cevirir (henuz PARCALARA BOLMEDEN - bkz. dosyanin en ustundeki
+    "NEDEN BURADA HIC BOLME YOK" notu). Tablo/gorsel dogrulugu
+    ONEMSENMIYOR - sadece baslik yapisi cikarmak yeterli.
 
     ADIMLAR:
     1) Sayfa bazli ham metni al (SADECE header/footer tespiti icin)
     2) Tum PDF'i BIRLESIK markdown olarak al (baslik hiyerarsisiyle)
     3) Tekrar eden (header/footer) satirlari birlesik markdown'dan temizle
-    4) markdown_bol ile GERCEK baslik/bolum sinirlarina gore bol
 
     dosya_yolu: PDF dosyasinin sunucudaki fiziksel yolu
 
-    Donen deger: baslik/bolum bazinda MetinParcasi listesi. PDF'ten
-                 hic metin cikarilamazsa (orn. taranmis/goruntu
-                 tabanli PDF) BOS liste doner.
+    Donen deger: ham markdown metni. PDF'ten hic metin cikarilamazsa
+                 (orn. taranmis/goruntu tabanli PDF) BOS string doner.
     """
 
     # 1) Sayfa bazli ham metni al - SADECE header/footer tespiti icin
@@ -118,9 +120,6 @@ def pdf_metnini_cikar(dosya_yolu: str) -> list[MetinParcasi]:
         tam_markdown = "\n".join(temiz_satirlar)
 
     if not tam_markdown.strip():
-        return []
+        return ""
 
-    # 4) markdown_bol ile GERCEK baslik/bolum sinirlarina gore bol -
-    #    structural_parser.py'deki AYNI fonksiyon, PDF icin ayri bir
-    #    bolme mantigi yazmaya gerek yok.
-    return markdown_bol(tam_markdown)
+    return tam_markdown
