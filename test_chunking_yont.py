@@ -7,17 +7,17 @@ import stanza
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.services.structural_parser import (
-    MetinParcasi,
+    Parca,
     markdown_bol,
     liste_maddelerine_gore_bol,
     parcalari_boyuta_gore_bol,
     bos_parcalari_temizle,
-    _kucuk_artiklari_birlestir,
+    _kucuk_parcalari_birlestir,
 )
 
 from app.embeddings.embedding_servisi import token_sayisi, _model
 
-def mevcut_yontem(content:str) -> list[MetinParcasi]:
+def mevcut_yontem(content:str) -> list[Parca]:
 
     """     Su an /sources/markdown ve /pages/{id}/index'te GERCEKTEN kullanilan
     pipeline - deneyin BASELINE'i budur, diger tum yontemler buna karsi
@@ -31,7 +31,7 @@ def mevcut_yontem(content:str) -> list[MetinParcasi]:
     return parcalar
 
 
-def yontem_genellestirilmis_merge(content: str) -> list[MetinParcasi]:
+def yontem_genellestirilmis_merge(content: str) -> list[Parca]:
     """
     mevcut_yontem ile AYNI 4 adim, artı bir 5. adim: _kucuk_artiklari_
     birlestir.
@@ -47,7 +47,7 @@ def yontem_genellestirilmis_merge(content: str) -> list[MetinParcasi]:
     uyguluyoruz - Adaptive Chunking makalesindeki "Tiny-chunk merging"
     post-processing adimiyla ayni fikir (bkz. makale bolum 2.2).
 
-    ONEMLI DAVRANIS FARKI: _kucuk_artiklari_birlestir, birlesen parcanin
+    ONEMLI DAVRANIS FARKI: _kucuk_parcalari_birlestir, birlesen parcanin
     baslik/seviye bilgisini HEP ONCEKI parcadan alıyor - yani kucuk bir
     parca FARKLI bir basligin altindaki parcayla birlesirse, olusan
     parcanin "baslik" metadatasi artik icerigin TAMAMINI dogru
@@ -58,7 +58,7 @@ def yontem_genellestirilmis_merge(content: str) -> list[MetinParcasi]:
     parcalar = liste_maddelerine_gore_bol(parcalar)
     parcalar = parcalari_boyuta_gore_bol(parcalar, token_sayisi, maks_token=1800)
     parcalar = bos_parcalari_temizle(parcalar)
-    parcalar = _kucuk_artiklari_birlestir(parcalar, token_sayisi)
+    parcalar = _kucuk_parcalari_birlestir(parcalar, token_sayisi)
     return parcalar
 
 
@@ -122,7 +122,7 @@ def _anlamsal_sinirlari_bul(cumleler: list[str], esik_yuzdelik: float = 90) -> s
     return {i for i, uzaklik in enumerate(uzakliklar) if uzaklik > esik}
 
 
-def _anlamsal_bol(content: str, cumle_ayirici_fonksiyon) -> list[MetinParcasi]:
+def _anlamsal_bol(content: str, cumle_ayirici_fonksiyon) -> list[Parca]:
     """
     yontem_semantik VE yontem_semantik_stanza'nin PAYLASTIGI ortak mantik.
     Ikisinin arasindaki TEK fark hangi cumle ayirici fonksiyonu
@@ -146,7 +146,7 @@ def _anlamsal_bol(content: str, cumle_ayirici_fonksiyon) -> list[MetinParcasi]:
     ADIL karsilastirma icin de aynı guvenlik agi (maks_token=1800)
     kullaniliyor.
 
-    NEDEN SONUNDA _kucuk_artiklari_birlestir DE VAR: gercek veriyle test
+    NEDEN SONUNDA _kucuk_parcalari_birlestir DE VAR: gercek veriyle test
     ederken (Sayfa 37) bu yontemin 4-8 token'lik "yetim" parcalar
     urettigini gorduk - PDF'teki "<!-- Start of picture text -->" gibi
     kisa gurultu satirlari, cevresinde buyuk bir anlamsal sicrama
@@ -167,7 +167,7 @@ def _anlamsal_bol(content: str, cumle_ayirici_fonksiyon) -> list[MetinParcasi]:
     basliklara_gore = markdown_bol(content)
     basliklara_gore = bos_parcalari_temizle(basliklara_gore)
 
-    sonuc: list[MetinParcasi] = []
+    sonuc: list[Parca] = []
     for parca in basliklara_gore:
         cumleler = cumle_ayirici_fonksiyon(parca.icerik)
 
@@ -181,17 +181,17 @@ def _anlamsal_bol(content: str, cumle_ayirici_fonksiyon) -> list[MetinParcasi]:
         for i, cumle in enumerate(cumleler):
             biriken.append(cumle)
             if i in sinirlar:
-                sonuc.append(MetinParcasi(baslik=parca.baslik, icerik="\n".join(biriken), seviye=parca.seviye))
+                sonuc.append(Parca(baslik=parca.baslik, icerik="\n".join(biriken), seviye=parca.seviye))
                 biriken = []
         if biriken:
-            sonuc.append(MetinParcasi(baslik=parca.baslik, icerik="\n".join(biriken), seviye=parca.seviye))
+            sonuc.append(Parca(baslik=parca.baslik, icerik="\n".join(biriken), seviye=parca.seviye))
 
     sonuc = parcalari_boyuta_gore_bol(sonuc, token_sayisi, maks_token=1800)
-    sonuc = _kucuk_artiklari_birlestir(sonuc, token_sayisi)
+    sonuc = _kucuk_parcalari_birlestir(sonuc, token_sayisi)
     return sonuc
 
 
-def yontem_semantik(content: str) -> list[MetinParcasi]:
+def yontem_semantik(content: str) -> list[Parca]:
     """Anlamsal sinir bulma + regex cumle ayirici (_cumlelere_ayir). Bkz. _anlamsal_bol."""
     return _anlamsal_bol(content, _cumlelere_ayir)
 
@@ -224,7 +224,7 @@ def _stanza_cumlelere_ayir(metin: str) -> list[str]:
     return [cumle.text for cumle in belge.sentences]
 
 
-def yontem_cumle_bazli(content: str) -> list[MetinParcasi]:
+def yontem_cumle_bazli(content: str) -> list[Parca]:
     """
     Adaptive Chunking makalesindeki "sentence-based chunking" baseline'i
     (bkz. bolum 2.2): basliklara bol (markdown_bol), her basligin
@@ -240,7 +240,7 @@ def yontem_cumle_bazli(content: str) -> list[MetinParcasi]:
     basliklara_gore = markdown_bol(content)
     basliklara_gore = bos_parcalari_temizle(basliklara_gore)
 
-    sonuc: list[MetinParcasi] = []
+    sonuc: list[Parca] = []
     for parca in basliklara_gore:
         cumleler = _stanza_cumlelere_ayir(parca.icerik)
 
@@ -250,13 +250,13 @@ def yontem_cumle_bazli(content: str) -> list[MetinParcasi]:
 
         for i in range(0, len(cumleler), CUMLE_BASINA_GRUP):
             grup = cumleler[i:i + CUMLE_BASINA_GRUP]
-            sonuc.append(MetinParcasi(baslik=parca.baslik, icerik="\n".join(grup), seviye=parca.seviye))
+            sonuc.append(Parca(baslik=parca.baslik, icerik="\n".join(grup), seviye=parca.seviye))
 
     sonuc = parcalari_boyuta_gore_bol(sonuc, token_sayisi, maks_token=1800)
     return sonuc
 
 
-def yontem_semantik_stanza(content: str) -> list[MetinParcasi]:
+def yontem_semantik_stanza(content: str) -> list[Parca]:
     """
     yontem_semantik ile TEK farki: cumle ayirici olarak regex tahmini
     (_cumlelere_ayir) yerine gercek Stanza modeli (_stanza_cumlelere_ayir)
@@ -308,7 +308,7 @@ OVERLAP_RECURSIVE_CHUNK_SIZE = 1800
 OVERLAP_RECURSIVE_CHUNK_OVERLAP = 150
 
 
-def yontem_overlap_recursive(content: str) -> list[MetinParcasi]:
+def yontem_overlap_recursive(content: str) -> list[Parca]:
     """
     Adaptive Chunking makalesindeki LangChain RecursiveCharacterTextSplitter
     baseline'i (bkz. bolum 2.2, Ek G) - makale bu yontemi KENDI YAZMAMIS,
@@ -333,7 +333,7 @@ def yontem_overlap_recursive(content: str) -> list[MetinParcasi]:
     splitter icin bunlar nadiren tetiklenir).
 
     NEDEN ekstra bir guvenlik agi (parcalari_boyuta_gore_bol,
-    _kucuk_artiklari_birlestir) YOK: RecursiveCharacterTextSplitter'in
+    _kucuk_parcalari_birlestir) YOK: RecursiveCharacterTextSplitter'in
     kendi ICINDE zaten hem boyut siniri (chunk_size) hem kucuk parcalari
     komsusuyla birlestirme mantigi var - digerlerinin aksine bu yonteme
     ekstra bir sey eklemeye gerek yok, kutuphanenin kendi davranisini
@@ -350,10 +350,10 @@ def yontem_overlap_recursive(content: str) -> list[MetinParcasi]:
     basliklara_gore = markdown_bol(content)
     basliklara_gore = bos_parcalari_temizle(basliklara_gore)
 
-    sonuc: list[MetinParcasi] = []
+    sonuc: list[Parca] = []
     for parca in basliklara_gore:
         for alt_metin in splitter.split_text(parca.icerik):
-            sonuc.append(MetinParcasi(baslik=parca.baslik, icerik=alt_metin, seviye=parca.seviye))
+            sonuc.append(Parca(baslik=parca.baslik, icerik=alt_metin, seviye=parca.seviye))
 
     return sonuc
 
@@ -463,13 +463,13 @@ SPLIT_MERGE_HEDEF_600 = 600
 SPLIT_MERGE_OVERLAP = 100
 
 
-def _split_then_merge_bol(content: str, hedef_boyut: int) -> list[MetinParcasi]:
+def _split_then_merge_bol(content: str, hedef_boyut: int) -> list[Parca]:
     """
     yontem_split_then_merge_1100 ve _600'un PAYLASTIGI ortak mantik -
     tek fark hedef_boyut. markdown_bol ile basliklara boler (digerleriyle
     ayni desen), her basligin icerigini once _recursif_kucult (PASS 1),
     sonra _acgozlu_birlestir (PASS 2) ile isler, sonunda guvenlik agi
-    olarak parcalari_boyuta_gore_bol + _kucuk_artiklari_birlestir
+    olarak parcalari_boyuta_gore_bol + _kucuk_parcalari_birlestir
     calistirir (makaledeki "final regularization" post-processing
     adimlariyla ayni fikir - bkz. mevcut_yontem/yontem_genellestirilmis_
     merge'deki ayni araclar).
@@ -477,23 +477,23 @@ def _split_then_merge_bol(content: str, hedef_boyut: int) -> list[MetinParcasi]:
     basliklara_gore = markdown_bol(content)
     basliklara_gore = bos_parcalari_temizle(basliklara_gore)
 
-    sonuc: list[MetinParcasi] = []
+    sonuc: list[Parca] = []
     for parca in basliklara_gore:
         kucultulmus = _recursif_kucult(parca.icerik, MAKALE_AYIRICILARI, hedef_boyut)
         birlestirilmis = _acgozlu_birlestir(kucultulmus, hedef_boyut, SPLIT_MERGE_OVERLAP)
         for alt_metin in birlestirilmis:
-            sonuc.append(MetinParcasi(baslik=parca.baslik, icerik=alt_metin, seviye=parca.seviye))
+            sonuc.append(Parca(baslik=parca.baslik, icerik=alt_metin, seviye=parca.seviye))
 
     sonuc = parcalari_boyuta_gore_bol(sonuc, token_sayisi, maks_token=hedef_boyut)
-    sonuc = _kucuk_artiklari_birlestir(sonuc, token_sayisi)
+    sonuc = _kucuk_parcalari_birlestir(sonuc, token_sayisi)
     return sonuc
 
 
-def yontem_split_then_merge_1100(content: str) -> list[MetinParcasi]:
+def yontem_split_then_merge_1100(content: str) -> list[Parca]:
     """Split-then-merge recursive splitter, hedef boyut=1100 token (makaledeki en iyi varyant). Bkz. _split_then_merge_bol."""
     return _split_then_merge_bol(content, SPLIT_MERGE_HEDEF_1100)
 
 
-def yontem_split_then_merge_600(content: str) -> list[MetinParcasi]:
+def yontem_split_then_merge_600(content: str) -> list[Parca]:
     """Split-then-merge recursive splitter, hedef boyut=600 token. Bkz. _split_then_merge_bol."""
     return _split_then_merge_bol(content, SPLIT_MERGE_HEDEF_600)

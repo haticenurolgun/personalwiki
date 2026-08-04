@@ -31,10 +31,10 @@ Calistirmak icin (venv aktifken, proje kok dizininde):
 """
 
 from app.services.structural_parser import (
-    MetinParcasi,
+    Parca,
     markdown_bol,
     bos_parcalari_temizle,
-    _madde_satiri_mi,
+    _madde_mi,
 )
 from app.embeddings.embedding_servisi import token_sayisi
 
@@ -84,7 +84,7 @@ def _sayfa_turunu_belirle(content: str) -> str:
     en_uzun_bolum = max((token_sayisi(b.icerik) for b in bolumler), default=0)
 
     satirlar = [s for s in content.split("\n") if s.strip()]
-    madde_satirlari = [s for s in satirlar if _madde_satiri_mi(s)]
+    madde_satirlari = [s for s in satirlar if _madde_mi(s)]
     liste_orani = len(madde_satirlari) / len(satirlar) if satirlar else 0.0
 
     if en_uzun_bolum > BUYUK_BOLUM_ESIGI:
@@ -96,7 +96,7 @@ def _sayfa_turunu_belirle(content: str) -> str:
     return "duz_metin"
 
 
-def yontem_sec(content: str) -> tuple[str, list[MetinParcasi]]:
+def yontem_sec(content: str) -> tuple[str, list[Parca]]:
     """
     Sayfa icerigine bakip en uygun chunking yontemini SECER, calistirir
     ve (secilen yontemin ismi, sonuc parcalari) dondurur - hem hangi

@@ -3,7 +3,7 @@ deney_metrikleri.py
 
 Adaptive Chunking makalesindeki 4 icsel kalite metrigini (ICC, DCC, BI,
 SC) projemizin verisiyle hesaplayan SAF fonksiyonlar - veritabanina/
-Chroma'ya DOKUNMAZ, sadece MetinParcasi listeleri alip sayisal skor
+Chroma'ya DOKUNMAZ, sadece Parca listeleri alip sayisal skor
 dondurur.
 
 NOT: Makaledeki 5. metrik olan References Completeness (RC) BILINCLI
@@ -16,12 +16,12 @@ belirtiyor - bkz. bolum 6 "Limitations").
 import numpy as np
 
 from app.embeddings.embedding_servisi import token_sayisi, _model
-from app.services.structural_parser import MetinParcasi, _madde_satiri_mi
+from app.services.structural_parser import Parca, _madde_mi
 
 from test_chunking_yont import _cumlelere_ayir
 
 
-def hesapla_icc(parcalar: list[MetinParcasi]) -> float:
+def hesapla_icc(parcalar: list[Parca]) -> float:
     """
     Intrachunk Cohesion (bkz. makale 2.3.3): her parcanin KENDI
     cumleleri ile TAM PARCA embedding'i arasindaki ortalama kozinus
@@ -66,7 +66,7 @@ def hesapla_icc(parcalar: list[MetinParcasi]) -> float:
 DCC_PENCERE_TOKEN_BUDGET = 3000
 
 
-def hesapla_dcc(parcalar: list[MetinParcasi]) -> float:
+def hesapla_dcc(parcalar: list[Parca]) -> float:
     """
     Document Contextual Coherence (bkz. makale 2.3.4): her chunk, KENDI
     CEVRESINDEKI genis baglam penceresiyle ne kadar tutarli?
@@ -158,7 +158,7 @@ def _altin_bloklari_cikar(sayfa_icerigi: str) -> list[str]:
         if not satirlar:
             continue
 
-        madde_satirlari = [s for s in satirlar if _madde_satiri_mi(s)]
+        madde_satirlari = [s for s in satirlar if _madde_mi(s)]
         if len(satirlar) >= 2 and len(madde_satirlari) == len(satirlar):
             bloklar.extend(_madde_metnini_temizle(s) for s in madde_satirlari)
         else:
@@ -171,7 +171,7 @@ def _normalize_bosluk(metin: str) -> str:
     return " ".join(metin.split())
 
 
-def hesapla_bi(sayfa_icerigi: str, parcalar: list[MetinParcasi]) -> float:
+def hesapla_bi(sayfa_icerigi: str, parcalar: list[Parca]) -> float:
     """
     Block Integrity (bkz. makale 2.3.2): altin bloklarin KACI, TEK BIR
     chunk'in icinde BUTUN halde kaliyor?
@@ -209,7 +209,7 @@ SC_MIN_TOKEN = 20
 SC_MAX_TOKEN = 1800
 
 
-def hesapla_sc(parcalar: list[MetinParcasi], min_token: int = SC_MIN_TOKEN, max_token: int = SC_MAX_TOKEN) -> float:
+def hesapla_sc(parcalar: list[Parca], min_token: int = SC_MIN_TOKEN, max_token: int = SC_MAX_TOKEN) -> float:
     """Size Compliance (bkz. makale 2.3.5): parcalarin kacta kaci [min_token, max_token] araliginda?"""
     if not parcalar:
         return 0.0

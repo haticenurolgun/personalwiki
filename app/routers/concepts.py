@@ -162,26 +162,20 @@ async def kavram_bul_veya_olustur(
     return node, yeni_mi
 
 
-@router.post("/{sayfa_id}/extract-concepts", response_model=ExtractConceptsCevabi)
-async def kavramlari_cikar(
-    sayfa_id: int,
-    db: AsyncSession = Depends(veritabani_oturumu_getir),
-):
+async def kavramlari_uygula(db: AsyncSession, unitler: list[SemanticUnit]) -> tuple[int, int, int]:
     """
-    Bir sayfanin tum SemanticUnit'lerinden LLM ile kavram ve iliski
-    cikarir, ontoloji kontrolu + deduplication uygulayarak kaydeder.
+    Verilen unit'lerden LLM ile kavram ve iliski cikarir, ontoloji
+    kontrolu + deduplication uygulayarak veritabanina EKLER - ama
+    COMMIT ETMEZ, cagiran taraf kendi commit zamanlamasina karar verir
+    (orn. sources.py'de baska islemlerle AYNI transaction'da commit
+    edilebilsin diye).
+
+    kavramlari_cikar route'u (manuel "Kavram Cikar" butonu) VE
+    sources.py'deki otomatik yukleme akisi (PDF/markdown eklenince)
+    BU FONKSIYONU PAYLASIR - ikisi de AYNI mantigi calistirir.
+
+    Donen deger: (olusturulan_kavram_sayisi, olusturulan_iliski_sayisi, onerilen_yeni_tip_sayisi)
     """
-    sonuc = await db.execute(
-        select(SemanticUnit).where(SemanticUnit.page_id == sayfa_id)
-    )
-    unitler = sonuc.scalars().all()
-
-    if not unitler:
-        raise HTTPException(
-            status_code=404,
-            detail="Bu sayfaya ait SemanticUnit bulunamadi - once /index cagirmalisin"
-        )
-
     toplam_kavram = 0
     toplam_iliski = 0
     toplam_onerilen_tip = 0
@@ -260,6 +254,34 @@ async def kavramlari_cikar(
             ))
             toplam_iliski += 1
 
+    return toplam_kavram, toplam_iliski, toplam_onerilen_tip
+
+
+@router.post("/{sayfa_id}/extract-concepts", response_model=ExtractConceptsCevabi)
+async def kavramlari_cikar(
+    sayfa_id: int,
+    db: AsyncSession = Depends(veritabani_oturumu_getir),
+):
+    """
+    Bir sayfanin tum SemanticUnit'lerinden LLM ile kavram ve iliski
+    cikarir, ontoloji kontrolu + deduplication uygulayarak kaydeder.
+    Asil is mantigi kavramlari_uygula'da - bu route sadece unit'leri
+    cekip sonucu API semasina uygun hale getiriyor (PDF/markdown
+    yuklerken OTOMATIK calisan akis da AYNI kavramlari_uygula'yi
+    kullaniyor, bkz. sources.py).
+    """
+    sonuc = await db.execute(
+        select(SemanticUnit).where(SemanticUnit.page_id == sayfa_id)
+    )
+    unitler = sonuc.scalars().all()
+
+    if not unitler:
+        raise HTTPException(
+            status_code=404,
+            detail="Bu sayfaya ait SemanticUnit bulunamadi - once /index cagirmalisin"
+        )
+
+    toplam_kavram, toplam_iliski, toplam_onerilen_tip = await kavramlari_uygula(db, unitler)
     await db.commit()
 
     return ExtractConceptsCevabi(
