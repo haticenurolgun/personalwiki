@@ -8,17 +8,20 @@ BU_DOSYANIN_KLASORU = os.path.dirname(os.path.abspath(__file__))
 CHROMA_VERI_YOLU = os.path.join(BU_DOSYANIN_KLASORU, "..", "..", "chroma_data")
 
 
-# all-MiniLM-L6-v2 (eski model) Ingilizce agirlikli bir tokenizer'a
-# sahipti - Turkce'ye ozgu karakterleri (orn. noktasiz "i") iyi
-# tokenize edemiyordu. Test edildi: "sinav" kelimesi (ASCII, yanlis
-# yazim) 2 token'a bolunurken, dogru yazilmis "sinav" 4 parcaya
-# bolunuyordu - bu da Turkce sorgularda anlamli oranda dusuk benzerlik
-# skoruna (0.70 vs 0.78) yol aciyordu. paraphrase-multilingual-MiniLM-
-# L12-v2, coklu dilli egitim gordugu icin Turkce kelimeleri cok daha
-# iyi (genelde TEK token olarak) taniyor. Vektor boyutu AYNI (384),
-# Chroma semasi bozulmuyor - ama max_seq_length daha dusuk (128 vs 256,
-# bkz. structural_parser.py'deki maks_token varsayilani).
-_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2", local_files_only=True)
+# paraphrase-multilingual-MiniLM-L12-v2'den (384 boyut) EmbeddingGemma-
+# 300M'e (768 boyut) gecildi - retrieval/RAG icin ozel egitilmis, cok
+# daha uzun context penceresi (2048 token) olan daha guclu bir model.
+# Vektor boyutu DEGISTI, bu yuzden Chroma'daki eski koleksiyonlar
+# uyumsuz - gecis migrate_embeddinggemma.py ile yapildi (eski
+# koleksiyonlar silinip tum veri yeniden embed edildi).
+#
+# EmbeddingGemma, dogru embed kalitesi icin metnin GOREVINE gore farkli
+# prompt onekleri ister (bkz. config_sentence_transformers.json'daki
+# "prompts" sozlugu) - asagidaki encode() cagrilarinda prompt_name
+# bunun icin veriliyor: "query" (arama sorgusu), "document" (aranacak
+# icerik), "STS" (iki kisa metnin ANLAMCA ayni sey olup olmadigini
+# kontrol etme - kavram/konu ismi eslestirme).
+_model = SentenceTransformer("google/embeddinggemma-300m", local_files_only=True)
 
 # Chroma istemcisini olustur 
 _chroma_client = chromadb.PersistentClient(path=CHROMA_VERI_YOLU)
@@ -72,7 +75,9 @@ def parcayi_kaydet(unit_id: int, page_id: int, icerik: str):
     # 1) Metni vektore cevir. .encode(), bir string alir, sayilardan
     #    olusan bir liste (vektor) doner. .tolist() ile numpy dizisini
     #    normal Python listesine ceviriyoruz - Chroma bunu bekliyor.
-    vektor = _model.encode(icerik).tolist()
+    #    prompt_name="document": bu, ARANACAK icerik tarafi (bkz.
+    #    benzer_parcalari_bul'daki "query" tarafi).
+    vektor = _model.encode(icerik, prompt_name="document").tolist()
 
     # 2) Chroma'ya kaydet. upsert = "update or insert" - eger bu id
     #    zaten varsa GUNCELLER, yoksa YENI ekler. Ayni id'yi tekrar
@@ -118,7 +123,9 @@ def kavram_kaydet(node_id: int, isim: str, tip: str):
              kavramlarla karsilastirma yapacagiz (bir KISI ile bir
              ARAC hicbir zaman "ayni kavram" sayilmamali).
     """
-    vektor = _model.encode(isim).tolist()
+    # prompt_name="STS": kavram isimleri arasinda RETRIEVAL degil,
+    # simetrik ANLAMSAL ESLESME kontrolu yapiyoruz (bkz. benzer_kavram_bul).
+    vektor = _model.encode(isim, prompt_name="STS").tolist()
 
     _kavram_koleksiyonu.upsert(
         ids=[str(node_id)],
@@ -157,7 +164,7 @@ def benzer_kavram_bul(isim: str, tip: str, esik: float) -> dict | None:
     if _kavram_koleksiyonu.count() == 0:
         return None
 
-    vektor = _model.encode(isim).tolist()
+    vektor = _model.encode(isim, prompt_name="STS").tolist()
 
     sonuclar = _kavram_koleksiyonu.query(
         query_embeddings=[vektor],
@@ -211,8 +218,8 @@ def en_benzer_konuyu_bul(konu: str, mevcut_konular: list[str], esik: float = KAT
     if not mevcut_konular:
         return None
 
-    konu_vektoru = _model.encode(konu)
-    aday_vektorleri = _model.encode(mevcut_konular)
+    konu_vektoru = _model.encode(konu, prompt_name="STS")
+    aday_vektorleri = _model.encode(mevcut_konular, prompt_name="STS")
 
     en_iyi_benzerlik = -1.0
     en_iyi_aday = None
@@ -241,7 +248,9 @@ def benzer_parcalari_bul(sorgu: str, sonuc_sayisi: int = 5) -> list[dict]:
 
         # 1) Sorgu metnini de AYNI modelle vektore cevir - aranan ve
         #    aranilan seyin ayni "dilde" (vektor uzayinda) olmasi sart.
-        sorgu_vektoru = _model.encode(sorgu).tolist()
+        #    prompt_name="query": parcayi_kaydet'teki "document" tarafiyla
+        #    eslesen, retrieval'in sorgu tarafi.
+        sorgu_vektoru = _model.encode(sorgu, prompt_name="query").tolist()
 
         # 2) Chroma'ya "bu vektore en yakin N sonucu getir" diye sor.
         sonuclar = _koleksiyon.query(

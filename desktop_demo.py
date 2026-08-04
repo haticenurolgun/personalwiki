@@ -266,6 +266,16 @@ class SayfaDetayDialogu(QDialog):
         self.kavram_cikar_butonu = QPushButton("Kavram Cikar")
         self.kavram_cikar_butonu.clicked.connect(self.kavram_cikar)
 
+        # Sayfa ici kavram grafigi (Katman 1) - GET /pages/{id}/graph.
+        # Kavram Cikar butonuyla dogrudan iliskili: cikarim yapildiktan
+        # SONRA burasi otomatik yenilenir, ama daha once cikarim yapilmis
+        # bir sayfa acildiginda da (self.sayfayi_yukle ile birlikte)
+        # dolu gelsin diye ayri bir "Yenile" butonu da var.
+        self.grafik_yenile_butonu = QPushButton("Grafigi Yenile")
+        self.grafik_yenile_butonu.clicked.connect(self.grafigi_yukle)
+
+        self.grafik_listesi = QListWidget()
+
         self.durum_etiketi = QLabel("")
         self.durum_etiketi.setWordWrap(True)
 
@@ -276,10 +286,14 @@ class SayfaDetayDialogu(QDialog):
         layout.addWidget(QLabel("Icerik:"))
         layout.addWidget(self.icerik_kutusu)
         layout.addWidget(self.kavram_cikar_butonu)
+        layout.addWidget(QLabel("Kavram Grafigi:"))
+        layout.addWidget(self.grafik_listesi)
+        layout.addWidget(self.grafik_yenile_butonu)
         layout.addWidget(self.durum_etiketi)
         self.setLayout(layout)
 
         self.sayfayi_yukle()
+        self.grafigi_yukle()
 
     def sayfayi_yukle(self):
         try:
@@ -349,6 +363,43 @@ class SayfaDetayDialogu(QDialog):
             f"{sonuc['olusturulan_iliski_sayisi']} iliski cikarildi "
             f"({sonuc['onerilen_yeni_tip_sayisi']} yeni tip onerisi)"
         )
+        self.grafigi_yukle()
+
+    def grafigi_yukle(self):
+        """
+        GET /pages/{id}/graph - bu sayfaya ait ConceptNode'lari ve
+        aralarindaki ConceptRelation'lari getirir. Once kavramlari,
+        sonra iliskileri listeler - iliski satirlarinda node id'leri
+        degil isimleri gostermek icin once bir id->isim eslemesi kuruyoruz.
+        """
+        try:
+            yanit = requests.get(f"{BACKEND_URL}/pages/{self.sayfa_id}/graph", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        graf = yanit.json()
+        self.grafik_listesi.clear()
+
+        id_to_isim = {kavram["id"]: kavram["standart_isim"] for kavram in graf["kavramlar"]}
+
+        if not graf["kavramlar"]:
+            self.grafik_listesi.addItem(QListWidgetItem("Henuz kavram cikarilmamis"))
+            return
+
+        for kavram in graf["kavramlar"]:
+            self.grafik_listesi.addItem(QListWidgetItem(f"🏷 {kavram['standart_isim']} ({kavram['tip']})"))
+
+        for iliski in graf["iliskiler"]:
+            kaynak_isim = id_to_isim.get(iliski["kaynak_id"], f"#{iliski['kaynak_id']}")
+            hedef_isim = id_to_isim.get(iliski["hedef_id"], f"#{iliski['hedef_id']}")
+            self.grafik_listesi.addItem(
+                QListWidgetItem(f"   {kaynak_isim} —[{iliski['iliski_tipi']}]→ {hedef_isim}")
+            )
 
 
 class SohbetSekmesi(QWidget):
@@ -732,6 +783,99 @@ class SayfalarSekmesi(QWidget):
         self.sayfalari_yukle()
 
 
+class GlobalGrafSekmesi(QWidget):
+    """
+    "Global Graf" sekmesi: sayfalar arasi, ORTAK KAVRAMLAR uzerinden
+    kurulan baglanti haritasi (Katman 2) - GET /graph/global. Bu,
+    SayfaDetayDialogu'ndaki sayfa ICI grafikten (Katman 1) farkli -
+    orada tek bir sayfanin kavramlari/iliskileri var, burada FARKLI
+    sayfalarin ayni kavramdan gectigi icin birbirine baglanmasi var.
+
+    Onceden hesaplanmis veriyi gosterir - yeni kavram cikarimi
+    yapildiktan sonra "Yeniden Hesapla"ya (POST /graph/global/yeniden-
+    hesapla) basilmadan guncel gelmeyebilir (bkz. graph.py docstring'i).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.yenile_butonu = QPushButton("Yenile")
+        self.yenile_butonu.clicked.connect(self.grafigi_yukle)
+
+        self.yeniden_hesapla_butonu = QPushButton("Yeniden Hesapla")
+        self.yeniden_hesapla_butonu.clicked.connect(self.yeniden_hesapla)
+
+        self.baglanti_listesi = QListWidget()
+
+        self.durum_etiketi = QLabel("Baglantilari gormek icin 'Yenile'ye bas")
+
+        ust_satir = QHBoxLayout()
+        ust_satir.addWidget(self.yenile_butonu)
+        ust_satir.addWidget(self.yeniden_hesapla_butonu)
+
+        layout = QVBoxLayout()
+        layout.addLayout(ust_satir)
+        layout.addWidget(self.baglanti_listesi)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+    def grafigi_yukle(self):
+        self.durum_etiketi.setText("Yukleniyor...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.get(f"{BACKEND_URL}/graph/global", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        graf = yanit.json()
+        self.baglanti_listesi.clear()
+
+        # Baglantilar sadece sayfa ID'si tasiyor - okunabilir olmasi
+        # icin once id->baslik eslemesi kuruyoruz.
+        id_to_baslik = {sayfa["id"]: sayfa["title"] for sayfa in graf["sayfalar"]}
+
+        if not graf["baglantilar"]:
+            self.baglanti_listesi.addItem(QListWidgetItem("Henuz baglanti yok - 'Yeniden Hesapla'yi dene"))
+            self.durum_etiketi.setText("0 baglanti")
+            return
+
+        for baglanti in graf["baglantilar"]:
+            baslik_1 = id_to_baslik.get(baglanti["sayfa_id_1"], f"#{baglanti['sayfa_id_1']}")
+            baslik_2 = id_to_baslik.get(baglanti["sayfa_id_2"], f"#{baglanti['sayfa_id_2']}")
+            metin = f"{baslik_1}  ↔  {baslik_2}   (ortak kavram: {baglanti['ortak_kavram_ismi']})"
+            self.baglanti_listesi.addItem(QListWidgetItem(metin))
+
+        self.durum_etiketi.setText(f"{len(graf['baglantilar'])} baglanti, {len(graf['sayfalar'])} sayfa")
+
+    def yeniden_hesapla(self):
+        """
+        POST /graph/global/yeniden-hesapla - SayfaBaglantisi tablosunu
+        sifirdan yeniden kurar (bkz. graph.py). Bu bir LLM cagrisi degil,
+        sadece veritabani islemi - ama sayfa/kavram sayisi arttikca
+        yine de biraz surebilir.
+        """
+        self.durum_etiketi.setText("Yeniden hesaplaniyor...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.post(f"{BACKEND_URL}/graph/global/yeniden-hesapla", timeout=30)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        self.grafigi_yukle()
+
+
 class AnaPencere(QMainWindow):
     """
     Uygulamanin ANA penceresi. Icerigi bir QTabWidget (sekmeler) -
@@ -751,6 +895,7 @@ class AnaPencere(QMainWindow):
         sekmeler.addTab(SohbetSekmesi(), "Sohbet")
         sekmeler.addTab(AramaSekmesi(), "Ara")
         sekmeler.addTab(SayfalarSekmesi(), "Sayfalar")
+        sekmeler.addTab(GlobalGrafSekmesi(), "Global Graf")
 
         ana_layout = QVBoxLayout()
         ana_layout.addWidget(baslik_etiketi)
