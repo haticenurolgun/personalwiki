@@ -65,9 +65,12 @@ class AramaSonucu(BaseModel):
     benzerlik_uzakligi: float
     # Bu sonuc NASIL bulundu: "embedding" (vektor benzerligi),
     # "dogrudan_kavram" (sorguda gecen bir ConceptNode'a bagli) ya da
-    # "iliskili_kavram" (o kavrama ConceptRelation ile bagli baska bir
-    # kavrama bagli). embedding disindakiler icin benzerlik_uzakligi
-    # GERCEK bir kozinus uzakligi degil, sabit bir yer tutucudur.
+    # "iliskili_kavram:<ILISKI_TIPI>" (orn. "iliskili_kavram:ONKOSUL" -
+    # o kavrama ConceptRelation ile bagli baska bir kavrama bagli,
+    # hangi ILISKI_TIPLERI tipi uzerinden baglandigi da ekli).
+    # embedding disindakiler icin benzerlik_uzakligi GERCEK bir kozinus
+    # uzakligi degil, ILISKI TIPINE gore degisen sabit bir yer
+    # tutucudur (bkz. arama_servisi.py::ILISKI_TIPI_UZAKLIGI).
     bulunma_sekli: str
     
     
