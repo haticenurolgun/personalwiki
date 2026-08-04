@@ -21,12 +21,11 @@ from app.models.db_models import (
     ConceptRelation,
     KavramGorulme
 )
-from app.services.structural_parser import markdown_bol, parcalari_boyuta_gore_bol, liste_maddelerine_gore_bol, bos_parcalari_temizle
+from app.services.chunking_secici import yontem_sec
 from app.embeddings.embedding_servisi import (
     parcayi_kaydet,
     parcalari_sil,
     kavram_sil,
-    token_sayisi,
     en_benzer_konuyu_bul,
 )
 
@@ -90,19 +89,10 @@ async def sayfayi_indexle(
             detail="Bu sayfa zaten indexlenmis - tekrar indexlemek yinelenen/bozuk parcalar olusturur"
         )
 
-    parcalar = markdown_bol(sayfa.content)
-
-    # Icerigi BOS olan parcalari ele.
-    parcalar = bos_parcalari_temizle(parcalar)
-
-    # Bir bolum TAMAMEN bagimsiz liste maddelerinden olusuyorsa, her
-    # maddeyi ayri parca yap - yoksa embedding birden fazla bagimsiz
-    # gercegi "sulandirir".
-    parcalar = liste_maddelerine_gore_bol(parcalar)
-
-    # Bir baslik altindaki metin embedding modelinin token sinirini
-    # asarsa sessizce kirpilir - asan parcalari kucuk alt-parcalara bol.
-    parcalar = parcalari_boyuta_gore_bol(parcalar, token_sayisi)
+    # ICERIK TURUNE gore EN UYGUN chunking yontemini SEC ve calistir -
+    # bkz. chunking_secici.py. "semantik" secilirse embedding cagrisi
+    # icerebilir, thread'e gonderiyoruz ki event loop bloklanmasin.
+    yontem_adi, parcalar = await asyncio.to_thread(yontem_sec, sayfa.content)
 
     yeni_unitler = []
     for sira, parca in enumerate(parcalar):
@@ -167,36 +157,34 @@ async def sayfa_grafini_getir(
         ],
     )
 
-@router.post("/{sayfa_id}/classify", response_model=SiniflandirmaCevabi)
-async def sayfayi_siniflandir(
-    sayfa_id: int,
-    db: AsyncSession = Depends(veritabani_oturumu_getir),
-):
+async def siniflandirmayi_uygula(db: AsyncSession, sayfa: WikiPage) -> str:
     """
     Bir WikiPage'in icerigine bakip, hangi KONUYA/DERSE/PROJEYE ait
-    oldugunu belirler ve WikiPage.kategori sutununa kaydeder. Sabit
-    bir liste YOK - sistemde onceden var olan konular LLM'e gosterilir
-    (tutarli isimlendirme icin), LLM ya birine eslesir ya da yeni bir
-    konu onerir. LLM'in eslestirme karari, embedding benzerligiyle bir
-    GUVENLIK AGI olarak dogrulanir - bkz. classifier.py ve
-    en_benzer_konuyu_bul docstring'leri, LLM'in TEK BASINA capalama
-    onyargisi yasadigi (listede alakasiz tek bir secenek olsa bile ona
-    yapismasi) test edilerek bulundu. extract-concepts gibi MANUEL
-    tetiklenir - sayfa eklenirken otomatik calismaz.
+    oldugunu belirler ve sayfa.kategori'ye YAZAR - ama COMMIT ETMEZ,
+    cagiran taraf kendi commit zamanlamasina karar verir (orn.
+    sources.py'de baska islemlerle AYNI transaction'da commit
+    edilebilsin diye). sayfa.id'nin ONCEDEN atanmis olmasi gerekir
+    (yani en az bir db.flush()'tan sonra cagrilmali).
+
+    Sabit bir liste YOK - sistemde onceden var olan konular LLM'e
+    gosterilir (tutarli isimlendirme icin), LLM ya birine eslesir ya da
+    yeni bir konu onerir. LLM'in eslestirme karari, embedding
+    benzerligiyle bir GUVENLIK AGI olarak dogrulanir - bkz.
+    classifier.py ve en_benzer_konuyu_bul docstring'leri, LLM'in TEK
+    BASINA capalama onyargisi yasadigi (listede alakasiz tek bir
+    secenek olsa bile ona yapismasi) test edilerek bulundu.
+
+    sayfayi_siniflandir route'u (manuel "Siniflandir" butonu) VE
+    sources.py'deki otomatik yukleme akisi (PDF/markdown eklenince)
+    BU FONKSIYONU PAYLASIR.
     """
-    sonuc = await db.execute(select(WikiPage).where(WikiPage.id == sayfa_id))
-    sayfa = sonuc.scalars().first()
-
-    if sayfa is None:
-        raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
-
     # Sistemde DAHA ONCE olusturulmus tum konu isimlerini topla - hem
     # LLM'e tutarli isimlendirme icin gostermek hem de LLM'in
     # eslestirme kararini dogrulamak icin. Su anki sayfayi (henuz
     # kategorisiz olabilir) ve bos degerleri disarida birakiyoruz.
     mevcut_sonuc = await db.execute(
         select(WikiPage.kategori)
-        .where(WikiPage.kategori.isnot(None), WikiPage.id != sayfa_id)
+        .where(WikiPage.kategori.isnot(None), WikiPage.id != sayfa.id)
         .distinct()
     )
     mevcut_konular = [satir[0] for satir in mevcut_sonuc.all()]
@@ -222,6 +210,26 @@ async def sayfayi_siniflandir(
         kategori = sonuc_siniflandirma.kategori if dogrulanan is not None else sonuc_siniflandirma.bagimsiz_konu
 
     sayfa.kategori = kategori
+    return kategori
+
+
+@router.post("/{sayfa_id}/classify", response_model=SiniflandirmaCevabi)
+async def sayfayi_siniflandir(
+    sayfa_id: int,
+    db: AsyncSession = Depends(veritabani_oturumu_getir),
+):
+    """
+    Var olan bir sayfayi MANUEL olarak (yeniden) siniflandirir. Asil is
+    mantigi siniflandirmayi_uygula'da - PDF/markdown yuklerken OTOMATIK
+    calisan akis da AYNI fonksiyonu kullaniyor (bkz. sources.py).
+    """
+    sonuc = await db.execute(select(WikiPage).where(WikiPage.id == sayfa_id))
+    sayfa = sonuc.scalars().first()
+
+    if sayfa is None:
+        raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
+
+    kategori = await siniflandirmayi_uygula(db, sayfa)
     await db.commit()
 
     return SiniflandirmaCevabi(sayfa_id=sayfa_id, kategori=kategori)

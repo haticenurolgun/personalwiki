@@ -233,11 +233,18 @@ class SayfaDetayDialogu(QDialog):
     """
     Sayfalar listesindeki bir sayfaya CIFT TIKLAYINCA acilan detay
     penceresi. Tam icerigi gosterir, kategoriyi ELLE duzeltmeye
-    (siniflandirma bazen yanilabiliyor - bkz. proje notlari) ve
-    sayfadan kavram/iliski cikarmaya izin verir.
+    (siniflandirma bazen yanilabiliyor - bkz. proje notlari) izin
+    verir.
+
+    NOT: siniflandirma ve kavram cikarma artik sayfa yuklenirken
+    OTOMATIK calisiyor (bkz. sources.py) - burada ayri "Siniflandir"/
+    "Kavram Cikar" butonlari YOK. "Yeniden Isle" butonu, ikisini de
+    (siniflandirma + kavram cikarma) tekrar tetikleyen tek bir
+    yedek/duzeltme mekanizmasi - otomatik calisma basarisiz olduysa
+    ya da icerik guncellendikten sonra tazelemek icin.
 
     Ilgili endpoint'ler: GET /pages/{id}, PUT /pages/{id}/kategori,
-    POST /pages/{id}/extract-concepts.
+    POST /pages/{id}/classify, POST /pages/{id}/extract-concepts.
     """
 
     def __init__(self, sayfa_id: int, parent=None):
@@ -263,8 +270,8 @@ class SayfaDetayDialogu(QDialog):
         self.icerik_kutusu = QTextEdit()
         self.icerik_kutusu.setReadOnly(True)
 
-        self.kavram_cikar_butonu = QPushButton("Kavram Cikar")
-        self.kavram_cikar_butonu.clicked.connect(self.kavram_cikar)
+        self.yeniden_isle_butonu = QPushButton("Yeniden Isle (Siniflandir + Kavram Cikar)")
+        self.yeniden_isle_butonu.clicked.connect(self.yeniden_isle)
 
         # Sayfa ici kavram grafigi (Katman 1) - GET /pages/{id}/graph.
         # Kavram Cikar butonuyla dogrudan iliskili: cikarim yapildiktan
@@ -285,7 +292,7 @@ class SayfaDetayDialogu(QDialog):
         layout.addLayout(kategori_satiri)
         layout.addWidget(QLabel("Icerik:"))
         layout.addWidget(self.icerik_kutusu)
-        layout.addWidget(self.kavram_cikar_butonu)
+        layout.addWidget(self.yeniden_isle_butonu)
         layout.addWidget(QLabel("Kavram Grafigi:"))
         layout.addWidget(self.grafik_listesi)
         layout.addWidget(self.grafik_yenile_butonu)
@@ -341,25 +348,54 @@ class SayfaDetayDialogu(QDialog):
 
         self.durum_etiketi.setText("Kategori guncellendi")
 
-    def kavram_cikar(self):
-        self.durum_etiketi.setText("Kavramlar cikariliyor (LLM cagrisi, biraz surebilir)...")
+    def yeniden_isle(self):
+        """
+        Siniflandirma VE kavram cikarma normalde sayfa yuklenirken
+        OTOMATIK calisiyor (bkz. sources.py) - bu buton, ikisini
+        MANUEL olarak yeniden tetikleyen bir yedek/duzeltme
+        mekanizmasi. Once /classify, sonra /extract-concepts cagirir -
+        kategori kutusunu ve kavram grafigini gunceller.
+        """
+        self.durum_etiketi.setText("Siniflandiriliyor (LLM cagrisi, biraz surebilir)...")
         QApplication.processEvents()
 
         try:
-            yanit = requests.post(
-                f"{BACKEND_URL}/pages/{self.sayfa_id}/extract-concepts", timeout=120
+            siniflandirma_yaniti = requests.post(
+                f"{BACKEND_URL}/pages/{self.sayfa_id}/classify", timeout=90
             )
-            yanit.raise_for_status()
+            siniflandirma_yaniti.raise_for_status()
         except requests.exceptions.ConnectionError:
             self.durum_etiketi.setText("Backend'e baglanilamadi")
             return
         except requests.exceptions.RequestException as hata:
-            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            self.durum_etiketi.setText(f"Siniflandirma hatasi: {http_hata_mesaji(hata)}")
             return
 
-        sonuc = yanit.json()
+        yeni_kategori = siniflandirma_yaniti.json()["kategori"]
+        self.kategori_kutusu.setText(yeni_kategori)
+
+        self.durum_etiketi.setText("Kavramlar cikariliyor (LLM cagrisi, biraz surebilir)...")
+        QApplication.processEvents()
+
+        try:
+            kavram_yaniti = requests.post(
+                # Buyuk sayfalarda (cok sayida SemanticUnit) TUM unit'ler
+                # TEK bir Gemini cagrisinda islendigi icin (bkz.
+                # concepts.py::kavramlari_uygula) bu cagri uzun surebilir -
+                # 120s bircok gercek PDF icin yetersiz kaliyordu.
+                f"{BACKEND_URL}/pages/{self.sayfa_id}/extract-concepts", timeout=300
+            )
+            kavram_yaniti.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Kavram cikarma hatasi: {http_hata_mesaji(hata)}")
+            return
+
+        sonuc = kavram_yaniti.json()
         self.durum_etiketi.setText(
-            f"{sonuc['olusturulan_kavram_sayisi']} kavram, "
+            f"Kategori: {yeni_kategori} | {sonuc['olusturulan_kavram_sayisi']} kavram, "
             f"{sonuc['olusturulan_iliski_sayisi']} iliski cikarildi "
             f"({sonuc['onerilen_yeni_tip_sayisi']} yeni tip onerisi)"
         )
@@ -582,11 +618,16 @@ class AramaSekmesi(QWidget):
 class SayfalarSekmesi(QWidget):
     """
     "Sayfalar" sekmesi: var olan sayfalarin listesi + yonetim islemleri
-    (yeni sayfa, PDF yukleme, siniflandirma, silme, detay goruntuleme).
-    Ilgili endpoint'ler: GET /pages, POST /sources/pdf,
-    POST /pages/{id}/classify, DELETE /pages/{id}. Bir sayfaya CIFT
-    TIKLAYINCA (ya da "Detay Ac" ile) SayfaDetayDialogu acilir - orada
-    da PUT /pages/{id}/kategori ve POST /pages/{id}/extract-concepts var.
+    (yeni sayfa, PDF yukleme, silme, detay goruntuleme). Siniflandirma
+    ve kavram cikarma artik burada AYRI birer buton DEGIL - sayfa
+    yuklenirken otomatik calisiyor (bkz. sources.py), gerekirse
+    SayfaDetayDialogu'ndaki "Yeniden Isle" ile MANUEL tekrar
+    tetiklenebilir.
+
+    Ilgili endpoint'ler: GET /pages, POST /sources/pdf, DELETE /pages/{id}.
+    Bir sayfaya CIFT TIKLAYINCA (ya da "Detay Ac" ile) SayfaDetayDialogu
+    acilir - orada PUT /pages/{id}/kategori, POST /pages/{id}/classify
+    ve POST /pages/{id}/extract-concepts var.
     """
 
     def __init__(self, parent=None):
@@ -609,9 +650,6 @@ class SayfalarSekmesi(QWidget):
         self.detay_butonu = QPushButton("Detay Ac")
         self.detay_butonu.clicked.connect(self.secili_sayfa_detayini_ac)
 
-        self.siniflandir_butonu = QPushButton("Siniflandir")
-        self.siniflandir_butonu.clicked.connect(self.secili_sayfayi_siniflandir)
-
         self.sil_butonu = QPushButton("Sil")
         self.sil_butonu.setObjectName("silButonu")  # QSS'te kirmizi renk icin
         self.sil_butonu.clicked.connect(self.secili_sayfayi_sil)
@@ -625,7 +663,6 @@ class SayfalarSekmesi(QWidget):
 
         alt_satir = QHBoxLayout()
         alt_satir.addWidget(self.detay_butonu)
-        alt_satir.addWidget(self.siniflandir_butonu)
         alt_satir.addWidget(self.sil_butonu)
 
         layout = QVBoxLayout()
@@ -692,28 +729,6 @@ class SayfalarSekmesi(QWidget):
             return
         self.sayfa_detayini_ac(oge)
 
-    def secili_sayfayi_siniflandir(self):
-        sayfa_id = self._secili_sayfa_id()
-        if sayfa_id is None:
-            return
-
-        self.durum_etiketi.setText("Siniflandiriliyor (LLM cagrisi, birkac saniye surebilir)...")
-        QApplication.processEvents()
-
-        try:
-            yanit = requests.post(f"{BACKEND_URL}/pages/{sayfa_id}/classify", timeout=30)
-            yanit.raise_for_status()
-        except requests.exceptions.ConnectionError:
-            self.durum_etiketi.setText("Backend'e baglanilamadi")
-            return
-        except requests.exceptions.RequestException as hata:
-            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
-            return
-
-        sonuc = yanit.json()
-        self.durum_etiketi.setText(f"Siniflandirildi: {sonuc['kategori']}")
-        self.sayfalari_yukle()  # listeyi yenile ki yeni kategori gorulsun
-
     def secili_sayfayi_sil(self):
         sayfa_id = self._secili_sayfa_id()
         if sayfa_id is None:
@@ -769,7 +784,11 @@ class SayfalarSekmesi(QWidget):
                 yanit = requests.post(
                     f"{BACKEND_URL}/sources/pdf",
                     files={"dosya": (dosya_adi, dosya, "application/pdf")},
-                    timeout=120,
+                    # Bu tek istek; parcalama + embed + siniflandirma +
+                    # kavram cikarmayi (buyuk PDF'lerde TEK dev Gemini
+                    # cagrisi) hepsini kapsiyor - 120s buyuk PDF'lerde
+                    # yetersiz kaliyordu (bkz. extract-concepts timeout'u).
+                    timeout=300,
                 )
             yanit.raise_for_status()
         except requests.exceptions.ConnectionError:

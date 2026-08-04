@@ -22,10 +22,10 @@ from app.models.db_models import (
     KavramBirlesmesi,
 )
 from app.models.schemas import ExtractConceptsCevabi
-from app.services.concept_extractor import kavram_cikar_batch
+from app.services.concept_extractor import kavram_cikar_batch, BatchCikarimSonucu, CikarimSonucu
 from app.services.ontology import KAVRAM_TIPLERI, ILISKI_TIPLERI
 from app.services.normalize import normalize_et
-from app.embeddings.embedding_servisi import kavram_kaydet, benzer_kavram_bul
+from app.embeddings.embedding_servisi import kavram_kaydet, benzer_kavram_bul, token_sayisi
 
 router = APIRouter(prefix="/pages", tags=["Kavramlar"])
 
@@ -35,6 +35,64 @@ router = APIRouter(prefix="/pages", tags=["Kavramlar"])
 # birlestiriliyor. Bu deger, kalibrasyon.py scripti ile gercek verilerle
 # test edilerek 0.85 olarak belirlendi - bkz. proje notlari.
 BENZERLIK_ESIGI = 0.85
+
+# Buyuk sayfalarda (cok sayida SemanticUnit) TUM unit'leri TEK bir
+# Gemini cagrisinda batch'lemek - gercek kullanimda 84 unit'lik bir
+# PDF'te tek cagri 2+ dakika surdu, masaustu uygulamasinin (ve
+# migrate_chunking_secici.py'nin) timeout'unu asti. Bu yuzden unit'leri
+# bu TOKEN sinirini asmayacak ardisik gruplara ayirip HER GRUBU AYRI
+# (ama PARALEL) bir Gemini cagrisinda isliyoruz - batch'lemenin
+# faydasini (tek tek cagirmaktan cok daha az round-trip) korurken, tek
+# bir cagrinin suresiz buyumesini onluyor.
+KAVRAM_CIKARMA_GRUP_MAKS_TOKEN = 6000
+
+
+def _unitleri_gruplara_ayir(unitler: list[SemanticUnit]) -> list[list[SemanticUnit]]:
+    """
+    Unit'leri, HER GRUBUN toplam icerik token'i KAVRAM_CIKARMA_GRUP_
+    MAKS_TOKEN'i asmayacak sekilde ardisik (sirali) gruplara ayirir.
+    Tek basina siniri asan bir unit (nadir ama olasi) KENDI grubuna
+    yalniz konur - bolme/atlama yapilmiyor, sadece o unit tek basina
+    gonderiliyor.
+    """
+    gruplar: list[list[SemanticUnit]] = []
+    mevcut_grup: list[SemanticUnit] = []
+    mevcut_grup_token = 0
+
+    for unit in unitler:
+        unit_token = token_sayisi(unit.icerik)
+
+        if mevcut_grup and mevcut_grup_token + unit_token > KAVRAM_CIKARMA_GRUP_MAKS_TOKEN:
+            gruplar.append(mevcut_grup)
+            mevcut_grup = []
+            mevcut_grup_token = 0
+
+        mevcut_grup.append(unit)
+        mevcut_grup_token += unit_token
+
+    if mevcut_grup:
+        gruplar.append(mevcut_grup)
+
+    return gruplar
+
+
+async def grubu_isle(grup: list[SemanticUnit]) -> BatchCikarimSonucu:
+    """
+    Bir unit grubunu kavram_cikar_batch ile isler. kavram_cikar_batch
+    3 denemeden sonra hala basarisizsa (bkz. kendi @retry aciklamasi)
+    hatayi BURAYA firlatir - biz de bu grubu bos gecip (o gruptaki
+    unit'ler icin bos CikarimSonucu ile) TUM islemi cokertmeden devam
+    ediyoruz. Boylece 10 gruptan biri Gemini'nin gecici yogunlugu
+    yuzunden kalici basarisiz olsa bile, diger 9 grubun kavramlari
+    kaybolmuyor.
+    """
+    try:
+        return await asyncio.to_thread(kavram_cikar_batch, {u.id: u.icerik for u in grup})
+    except Exception:
+        return BatchCikarimSonucu(unit_sonuclari={
+            u.id: CikarimSonucu(kavramlar=[], iliskiler=[])
+            for u in grup
+        })
 
 
 async def kavram_bul_veya_olustur(
@@ -162,38 +220,41 @@ async def kavram_bul_veya_olustur(
     return node, yeni_mi
 
 
-@router.post("/{sayfa_id}/extract-concepts", response_model=ExtractConceptsCevabi)
-async def kavramlari_cikar(
-    sayfa_id: int,
-    db: AsyncSession = Depends(veritabani_oturumu_getir),
-):
+async def kavramlari_uygula(db: AsyncSession, unitler: list[SemanticUnit]) -> tuple[int, int, int]:
     """
-    Bir sayfanin tum SemanticUnit'lerinden LLM ile kavram ve iliski
-    cikarir, ontoloji kontrolu + deduplication uygulayarak kaydeder.
+    Verilen unit'lerden LLM ile kavram ve iliski cikarir, ontoloji
+    kontrolu + deduplication uygulayarak veritabanina EKLER - ama
+    COMMIT ETMEZ, cagiran taraf kendi commit zamanlamasina karar verir
+    (orn. sources.py'de baska islemlerle AYNI transaction'da commit
+    edilebilsin diye).
+
+    kavramlari_cikar route'u (manuel "Kavram Cikar" butonu) VE
+    sources.py'deki otomatik yukleme akisi (PDF/markdown eklenince)
+    BU FONKSIYONU PAYLASIR - ikisi de AYNI mantigi calistirir.
+
+    Donen deger: (olusturulan_kavram_sayisi, olusturulan_iliski_sayisi, onerilen_yeni_tip_sayisi)
     """
-    sonuc = await db.execute(
-        select(SemanticUnit).where(SemanticUnit.page_id == sayfa_id)
-    )
-    unitler = sonuc.scalars().all()
-
-    if not unitler:
-        raise HTTPException(
-            status_code=404,
-            detail="Bu sayfaya ait SemanticUnit bulunamadi - once /index cagirmalisin"
-        )
-
     toplam_kavram = 0
     toplam_iliski = 0
     toplam_onerilen_tip = 0
 
-    # Her unit icin ayri ayri LLM cagirmak yerine, hepsini TEK bir
-    # batch cagrisinda birlestiriyoruz - bkz. kavram_cikar_batch
-    # docstring'i (network round-trip sayisini azaltmak icin).
-    metinler = {unit.id: unit.icerik for unit in unitler}
-    batch_sonuc = await asyncio.to_thread(kavram_cikar_batch, metinler)
+    # Her unit icin ayri ayri LLM cagirmak yerine, TOKEN sinirina gore
+    # gruplara ayirip HER GRUBU AYRI (ama PARALEL) bir batch cagrisinda
+    # isliyoruz - bkz. KAVRAM_CIKARMA_GRUP_MAKS_TOKEN ve grubu_isle.
+    # Boylece hem batch'lemenin faydasi (network round-trip azaltma)
+    # korunuyor, hem buyuk sayfalarda (cok unit) TEK bir dev cagriya
+    # donusmuyor, hem de bir grubun kalici basarisiz olmasi diger
+    # gruplarin sonuclarini etkilemiyor.
+    gruplar = _unitleri_gruplara_ayir(unitler)
+
+    grup_sonuclari = await asyncio.gather(*[grubu_isle(grup) for grup in gruplar])
+
+    batch_unit_sonuclari: dict[int, CikarimSonucu] = {}
+    for grup_sonuc in grup_sonuclari:
+        batch_unit_sonuclari.update(grup_sonuc.unit_sonuclari)
 
     for unit in unitler:
-        cikarim = batch_sonuc.unit_sonuclari[unit.id]
+        cikarim = batch_unit_sonuclari[unit.id]
 
         isim_to_node = {}
 
@@ -260,6 +321,34 @@ async def kavramlari_cikar(
             ))
             toplam_iliski += 1
 
+    return toplam_kavram, toplam_iliski, toplam_onerilen_tip
+
+
+@router.post("/{sayfa_id}/extract-concepts", response_model=ExtractConceptsCevabi)
+async def kavramlari_cikar(
+    sayfa_id: int,
+    db: AsyncSession = Depends(veritabani_oturumu_getir),
+):
+    """
+    Bir sayfanin tum SemanticUnit'lerinden LLM ile kavram ve iliski
+    cikarir, ontoloji kontrolu + deduplication uygulayarak kaydeder.
+    Asil is mantigi kavramlari_uygula'da - bu route sadece unit'leri
+    cekip sonucu API semasina uygun hale getiriyor (PDF/markdown
+    yuklerken OTOMATIK calisan akis da AYNI kavramlari_uygula'yi
+    kullaniyor, bkz. sources.py).
+    """
+    sonuc = await db.execute(
+        select(SemanticUnit).where(SemanticUnit.page_id == sayfa_id)
+    )
+    unitler = sonuc.scalars().all()
+
+    if not unitler:
+        raise HTTPException(
+            status_code=404,
+            detail="Bu sayfaya ait SemanticUnit bulunamadi - once /index cagirmalisin"
+        )
+
+    toplam_kavram, toplam_iliski, toplam_onerilen_tip = await kavramlari_uygula(db, unitler)
     await db.commit()
 
     return ExtractConceptsCevabi(

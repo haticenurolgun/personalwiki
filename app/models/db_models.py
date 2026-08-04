@@ -121,7 +121,7 @@ class SemanticUnit(Base):
     # Bu parca hangi WikiPage'e ait?
     page_id = Column(Integer, ForeignKey("wiki_pages.id"), nullable=False)
 
-    # structural_parser.py'deki MetinParcasi ile birebir eslesen alanlar:
+    # structural_parser.py'deki Parca ile birebir eslesen alanlar:
     baslik = Column(String(300), nullable=False)
     icerik = Column(Text, nullable=False)
     seviye = Column(Integer, nullable=False)

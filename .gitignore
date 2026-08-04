@@ -5,6 +5,7 @@ __pycache__/
 app/uploads/*
 !app/uploads/.gitkeep
 chroma_data/
+chroma_data_test/
 *.db
 .idea/
 .claude/settings.local.json 

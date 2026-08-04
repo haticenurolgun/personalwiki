@@ -1,0 +1,63 @@
+﻿yontem,sayfa_id,sayfa_basligi,parca_sayisi,ICC,DCC,BI,SC,ortalama
+mevcut,1,Veritabani Temelleri,2,0.8495,0.8431,1.0,0.5,0.7981
+mevcut,22,Proje Durum Raporu,4,0.8493,0.8089,1.0,1.0,0.9146
+mevcut,26,Final Sınav Takvimi,6,0.8633,0.7809,1.0,0.6667,0.8277
+mevcut,27,yapılacaklar listesi,5,0.0,0.7644,1.0,0.0,0.4411
+mevcut,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,2,0.5572,0.8854,1.0,1.0,0.8607
+mevcut,33,Butce Degerlendirme Toplantisi,5,0.851,0.7796,1.0,0.4,0.7577
+mevcut,34,Yeni Calisan Oryantasyon Sureci,4,0.8658,0.8581,1.0,1.0,0.931
+mevcut,37,YZTA Bootcamp 2026 (2).pdf,3,0.5781,0.8868,1.0,1.0,0.8662
+genellestirilmis_merge,1,Veritabani Temelleri,2,0.8495,0.8431,1.0,0.5,0.7981
+genellestirilmis_merge,22,Proje Durum Raporu,4,0.8493,0.8089,1.0,1.0,0.9146
+genellestirilmis_merge,26,Final Sınav Takvimi,4,0.8726,0.819,1.0,1.0,0.9229
+genellestirilmis_merge,27,yapılacaklar listesi,1,0.7229,0.0,1.0,1.0,0.6807
+genellestirilmis_merge,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,2,0.5572,0.8854,1.0,1.0,0.8607
+genellestirilmis_merge,33,Butce Degerlendirme Toplantisi,3,0.7576,0.7983,1.0,0.6667,0.8056
+genellestirilmis_merge,34,Yeni Calisan Oryantasyon Sureci,4,0.8658,0.8581,1.0,1.0,0.931
+genellestirilmis_merge,37,YZTA Bootcamp 2026 (2).pdf,3,0.5781,0.8868,1.0,1.0,0.8662
+semantik,1,Veritabani Temelleri,2,0.8452,0.8469,1.0,0.5,0.798
+semantik,22,Proje Durum Raporu,4,0.8469,0.8086,1.0,1.0,0.9139
+semantik,26,Final Sınav Takvimi,4,0.8725,0.825,1.0,1.0,0.9244
+semantik,27,yapılacaklar listesi,1,0.7188,0.0,1.0,1.0,0.6797
+semantik,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,9,0.6974,0.796,0.9833,1.0,0.8692
+semantik,33,Butce Degerlendirme Toplantisi,4,0.8561,0.8127,1.0,0.75,0.8547
+semantik,34,Yeni Calisan Oryantasyon Sureci,4,0.8649,0.8554,1.0,1.0,0.9301
+semantik,37,YZTA Bootcamp 2026 (2).pdf,11,0.7219,0.791,0.9167,1.0,0.8574
+cumle_bazli,1,Veritabani Temelleri,2,0.8452,0.8469,1.0,0.5,0.798
+cumle_bazli,22,Proje Durum Raporu,4,0.8469,0.8086,1.0,1.0,0.9139
+cumle_bazli,26,Final Sınav Takvimi,3,0.8535,0.8534,1.0,1.0,0.9267
+cumle_bazli,27,yapılacaklar listesi,1,0.721,0.0,1.0,1.0,0.6802
+cumle_bazli,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,21,0.7286,0.7045,0.8167,1.0,0.8125
+cumle_bazli,33,Butce Degerlendirme Toplantisi,3,0.7984,0.8428,0.8,0.6667,0.777
+cumle_bazli,34,Yeni Calisan Oryantasyon Sureci,4,0.8649,0.8554,1.0,1.0,0.9301
+semantik_stanza,1,Veritabani Temelleri,2,0.8452,0.8469,1.0,0.5,0.798
+semantik_stanza,22,Proje Durum Raporu,4,0.8469,0.8086,1.0,1.0,0.9139
+semantik_stanza,26,Final Sınav Takvimi,3,0.8535,0.8534,1.0,1.0,0.9267
+semantik_stanza,27,yapılacaklar listesi,1,0.721,0.0,1.0,1.0,0.6802
+semantik_stanza,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,7,0.6534,0.8197,0.95,1.0,0.8558
+semantik_stanza,33,Butce Degerlendirme Toplantisi,3,0.7984,0.8428,0.8,0.6667,0.777
+semantik_stanza,34,Yeni Calisan Oryantasyon Sureci,4,0.8649,0.8554,1.0,1.0,0.9301
+overlap_recursive,1,Veritabani Temelleri,2,0.8495,0.8422,1.0,0.5,0.7979
+overlap_recursive,22,Proje Durum Raporu,4,0.8496,0.8072,1.0,1.0,0.9142
+overlap_recursive,26,Final Sınav Takvimi,3,0.8551,0.85,1.0,1.0,0.9263
+overlap_recursive,27,yapılacaklar listesi,1,0.7201,0.0,1.0,1.0,0.68
+overlap_recursive,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,2,0.5395,0.9411,1.0,1.0,0.8702
+overlap_recursive,33,Butce Degerlendirme Toplantisi,3,0.8269,0.8447,1.0,0.6667,0.8346
+overlap_recursive,34,Yeni Calisan Oryantasyon Sureci,4,0.8662,0.8576,1.0,1.0,0.9309
+overlap_recursive,37,YZTA Bootcamp 2026 (2).pdf,4,0.5827,0.904,1.0,1.0,0.8717
+split_then_merge_1100,1,Veritabani Temelleri,2,0.8495,0.8431,1.0,0.5,0.7981
+split_then_merge_1100,22,Proje Durum Raporu,4,0.8493,0.8089,1.0,1.0,0.9146
+split_then_merge_1100,26,Final Sınav Takvimi,3,0.8547,0.8503,1.0,1.0,0.9263
+split_then_merge_1100,27,yapılacaklar listesi,1,0.721,0.0,1.0,1.0,0.6802
+split_then_merge_1100,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,3,0.5593,0.8757,1.0,1.0,0.8587
+split_then_merge_1100,33,Butce Degerlendirme Toplantisi,3,0.8271,0.8487,1.0,0.6667,0.8356
+split_then_merge_1100,34,Yeni Calisan Oryantasyon Sureci,4,0.8658,0.8581,1.0,1.0,0.931
+split_then_merge_1100,37,YZTA Bootcamp 2026 (2).pdf,5,0.5813,0.8848,0.9167,1.0,0.8457
+split_then_merge_600,1,Veritabani Temelleri,2,0.8495,0.8431,1.0,0.5,0.7981
+split_then_merge_600,22,Proje Durum Raporu,4,0.8493,0.8089,1.0,1.0,0.9146
+split_then_merge_600,26,Final Sınav Takvimi,3,0.8547,0.8503,1.0,1.0,0.9263
+split_then_merge_600,27,yapılacaklar listesi,1,0.721,0.0,1.0,1.0,0.6802
+split_then_merge_600,30,ATLAS-Edge-AI-Tabanli-Otonom-Lazer-Yabani-Ot-Imha-Robotu (6).pdf,5,0.5903,0.8846,1.0,1.0,0.8687
+split_then_merge_600,33,Butce Degerlendirme Toplantisi,3,0.8271,0.8487,1.0,0.6667,0.8356
+split_then_merge_600,34,Yeni Calisan Oryantasyon Sureci,4,0.8658,0.8581,1.0,1.0,0.931
+split_then_merge_600,37,YZTA Bootcamp 2026 (2).pdf,9,0.6346,0.854,0.9167,1.0,0.8513
