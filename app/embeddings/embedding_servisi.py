@@ -8,19 +8,13 @@ BU_DOSYANIN_KLASORU = os.path.dirname(os.path.abspath(__file__))
 CHROMA_VERI_YOLU = os.path.join(BU_DOSYANIN_KLASORU, "..", "..", "chroma_data")
 
 
-# paraphrase-multilingual-MiniLM-L12-v2'den (384 boyut) EmbeddingGemma-
-# 300M'e (768 boyut) gecildi - retrieval/RAG icin ozel egitilmis, cok
-# daha uzun context penceresi (2048 token) olan daha guclu bir model.
-# Vektor boyutu DEGISTI, bu yuzden Chroma'daki eski koleksiyonlar
-# uyumsuz - gecis migrate_embeddinggemma.py ile yapildi (eski
-# koleksiyonlar silinip tum veri yeniden embed edildi).
-#
 # EmbeddingGemma, dogru embed kalitesi icin metnin GOREVINE gore farkli
 # prompt onekleri ister (bkz. config_sentence_transformers.json'daki
 # "prompts" sozlugu) - asagidaki encode() cagrilarinda prompt_name
 # bunun icin veriliyor: "query" (arama sorgusu), "document" (aranacak
 # icerik), "STS" (iki kisa metnin ANLAMCA ayni sey olup olmadigini
 # kontrol etme - kavram/konu ismi eslestirme).
+
 _model = SentenceTransformer("google/embeddinggemma-300m", local_files_only=True)
 
 # Chroma istemcisini olustur 

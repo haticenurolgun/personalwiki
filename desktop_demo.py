@@ -361,7 +361,7 @@ class SayfaDetayDialogu(QDialog):
 
         try:
             siniflandirma_yaniti = requests.post(
-                f"{BACKEND_URL}/pages/{self.sayfa_id}/classify", timeout=30
+                f"{BACKEND_URL}/pages/{self.sayfa_id}/classify", timeout=90
             )
             siniflandirma_yaniti.raise_for_status()
         except requests.exceptions.ConnectionError:
@@ -379,7 +379,11 @@ class SayfaDetayDialogu(QDialog):
 
         try:
             kavram_yaniti = requests.post(
-                f"{BACKEND_URL}/pages/{self.sayfa_id}/extract-concepts", timeout=120
+                # Buyuk sayfalarda (cok sayida SemanticUnit) TUM unit'ler
+                # TEK bir Gemini cagrisinda islendigi icin (bkz.
+                # concepts.py::kavramlari_uygula) bu cagri uzun surebilir -
+                # 120s bircok gercek PDF icin yetersiz kaliyordu.
+                f"{BACKEND_URL}/pages/{self.sayfa_id}/extract-concepts", timeout=300
             )
             kavram_yaniti.raise_for_status()
         except requests.exceptions.ConnectionError:
@@ -780,7 +784,11 @@ class SayfalarSekmesi(QWidget):
                 yanit = requests.post(
                     f"{BACKEND_URL}/sources/pdf",
                     files={"dosya": (dosya_adi, dosya, "application/pdf")},
-                    timeout=120,
+                    # Bu tek istek; parcalama + embed + siniflandirma +
+                    # kavram cikarmayi (buyuk PDF'lerde TEK dev Gemini
+                    # cagrisi) hepsini kapsiyor - 120s buyuk PDF'lerde
+                    # yetersiz kaliyordu (bkz. extract-concepts timeout'u).
+                    timeout=300,
                 )
             yanit.raise_for_status()
         except requests.exceptions.ConnectionError:

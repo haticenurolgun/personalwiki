@@ -22,10 +22,10 @@ from app.models.db_models import (
     KavramBirlesmesi,
 )
 from app.models.schemas import ExtractConceptsCevabi
-from app.services.concept_extractor import kavram_cikar_batch
+from app.services.concept_extractor import kavram_cikar_batch, BatchCikarimSonucu, CikarimSonucu
 from app.services.ontology import KAVRAM_TIPLERI, ILISKI_TIPLERI
 from app.services.normalize import normalize_et
-from app.embeddings.embedding_servisi import kavram_kaydet, benzer_kavram_bul
+from app.embeddings.embedding_servisi import kavram_kaydet, benzer_kavram_bul, token_sayisi
 
 router = APIRouter(prefix="/pages", tags=["Kavramlar"])
 
@@ -35,6 +35,64 @@ router = APIRouter(prefix="/pages", tags=["Kavramlar"])
 # birlestiriliyor. Bu deger, kalibrasyon.py scripti ile gercek verilerle
 # test edilerek 0.85 olarak belirlendi - bkz. proje notlari.
 BENZERLIK_ESIGI = 0.85
+
+# Buyuk sayfalarda (cok sayida SemanticUnit) TUM unit'leri TEK bir
+# Gemini cagrisinda batch'lemek - gercek kullanimda 84 unit'lik bir
+# PDF'te tek cagri 2+ dakika surdu, masaustu uygulamasinin (ve
+# migrate_chunking_secici.py'nin) timeout'unu asti. Bu yuzden unit'leri
+# bu TOKEN sinirini asmayacak ardisik gruplara ayirip HER GRUBU AYRI
+# (ama PARALEL) bir Gemini cagrisinda isliyoruz - batch'lemenin
+# faydasini (tek tek cagirmaktan cok daha az round-trip) korurken, tek
+# bir cagrinin suresiz buyumesini onluyor.
+KAVRAM_CIKARMA_GRUP_MAKS_TOKEN = 6000
+
+
+def _unitleri_gruplara_ayir(unitler: list[SemanticUnit]) -> list[list[SemanticUnit]]:
+    """
+    Unit'leri, HER GRUBUN toplam icerik token'i KAVRAM_CIKARMA_GRUP_
+    MAKS_TOKEN'i asmayacak sekilde ardisik (sirali) gruplara ayirir.
+    Tek basina siniri asan bir unit (nadir ama olasi) KENDI grubuna
+    yalniz konur - bolme/atlama yapilmiyor, sadece o unit tek basina
+    gonderiliyor.
+    """
+    gruplar: list[list[SemanticUnit]] = []
+    mevcut_grup: list[SemanticUnit] = []
+    mevcut_grup_token = 0
+
+    for unit in unitler:
+        unit_token = token_sayisi(unit.icerik)
+
+        if mevcut_grup and mevcut_grup_token + unit_token > KAVRAM_CIKARMA_GRUP_MAKS_TOKEN:
+            gruplar.append(mevcut_grup)
+            mevcut_grup = []
+            mevcut_grup_token = 0
+
+        mevcut_grup.append(unit)
+        mevcut_grup_token += unit_token
+
+    if mevcut_grup:
+        gruplar.append(mevcut_grup)
+
+    return gruplar
+
+
+async def grubu_isle(grup: list[SemanticUnit]) -> BatchCikarimSonucu:
+    """
+    Bir unit grubunu kavram_cikar_batch ile isler. kavram_cikar_batch
+    3 denemeden sonra hala basarisizsa (bkz. kendi @retry aciklamasi)
+    hatayi BURAYA firlatir - biz de bu grubu bos gecip (o gruptaki
+    unit'ler icin bos CikarimSonucu ile) TUM islemi cokertmeden devam
+    ediyoruz. Boylece 10 gruptan biri Gemini'nin gecici yogunlugu
+    yuzunden kalici basarisiz olsa bile, diger 9 grubun kavramlari
+    kaybolmuyor.
+    """
+    try:
+        return await asyncio.to_thread(kavram_cikar_batch, {u.id: u.icerik for u in grup})
+    except Exception:
+        return BatchCikarimSonucu(unit_sonuclari={
+            u.id: CikarimSonucu(kavramlar=[], iliskiler=[])
+            for u in grup
+        })
 
 
 async def kavram_bul_veya_olustur(
@@ -180,14 +238,23 @@ async def kavramlari_uygula(db: AsyncSession, unitler: list[SemanticUnit]) -> tu
     toplam_iliski = 0
     toplam_onerilen_tip = 0
 
-    # Her unit icin ayri ayri LLM cagirmak yerine, hepsini TEK bir
-    # batch cagrisinda birlestiriyoruz - bkz. kavram_cikar_batch
-    # docstring'i (network round-trip sayisini azaltmak icin).
-    metinler = {unit.id: unit.icerik for unit in unitler}
-    batch_sonuc = await asyncio.to_thread(kavram_cikar_batch, metinler)
+    # Her unit icin ayri ayri LLM cagirmak yerine, TOKEN sinirina gore
+    # gruplara ayirip HER GRUBU AYRI (ama PARALEL) bir batch cagrisinda
+    # isliyoruz - bkz. KAVRAM_CIKARMA_GRUP_MAKS_TOKEN ve grubu_isle.
+    # Boylece hem batch'lemenin faydasi (network round-trip azaltma)
+    # korunuyor, hem buyuk sayfalarda (cok unit) TEK bir dev cagriya
+    # donusmuyor, hem de bir grubun kalici basarisiz olmasi diger
+    # gruplarin sonuclarini etkilemiyor.
+    gruplar = _unitleri_gruplara_ayir(unitler)
+
+    grup_sonuclari = await asyncio.gather(*[grubu_isle(grup) for grup in gruplar])
+
+    batch_unit_sonuclari: dict[int, CikarimSonucu] = {}
+    for grup_sonuc in grup_sonuclari:
+        batch_unit_sonuclari.update(grup_sonuc.unit_sonuclari)
 
     for unit in unitler:
-        cikarim = batch_sonuc.unit_sonuclari[unit.id]
+        cikarim = batch_unit_sonuclari[unit.id]
 
         isim_to_node = {}
 
