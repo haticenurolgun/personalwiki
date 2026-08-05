@@ -5,7 +5,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.database import veritabanini_hazirla
-from app.routers import sources, pages, search, chat, concepts, graph, ontology
+from app.routers import sources, pages, search, chat, concepts, graph, ontology, kavramlar
 
 
 #fastapi oluşturuyoruz
@@ -49,3 +49,5 @@ app.include_router(concepts.router)
 app.include_router(graph.router)
 
 app.include_router(ontology.router)
+
+app.include_router(kavramlar.router)
