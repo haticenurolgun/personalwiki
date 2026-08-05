@@ -21,6 +21,7 @@ import webbrowser
 
 import requests
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QShortcut, QKeySequence, QTextCursor, QTextDocument
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -273,6 +274,43 @@ class SayfaDetayDialogu(QDialog):
         # PUT /pages/{id}/content'e gonderebilir.
         self.icerik_kutusu = QTextEdit()
 
+        # "Sayfada Bul" (Ctrl+F) cubugu - VARSAYILAN OLARAK GIZLI,
+        # Ctrl+F'e basinca acilir. Tarayicilardaki "sayfada bul"
+        # cubuguyla AYNI mantik: QTextEdit.find() metodunu kullanarak
+        # imlecin BULUNDUGU konumdan ileriye (ya da geriye) dogru
+        # arar - kendi arama/vurgulama mantigimizi elle yazmamiza
+        # gerek yok, Qt zaten bunu QTextDocument uzerinden sagliyor.
+        self.sayfada_arama_kutusu = QLineEdit()
+        self.sayfada_arama_kutusu.setPlaceholderText("Sayfada ara...")
+        self.sayfada_arama_kutusu.returnPressed.connect(self.sayfada_sonrakini_bul)
+        self.sayfada_arama_kutusu.textChanged.connect(self.sayfada_aramayi_sifirla_ve_bul)
+
+        self.sayfada_onceki_butonu = QPushButton("◀")
+        self.sayfada_onceki_butonu.setFixedWidth(32)
+        self.sayfada_onceki_butonu.clicked.connect(self.sayfada_oncekini_bul)
+
+        self.sayfada_sonraki_butonu = QPushButton("▶")
+        self.sayfada_sonraki_butonu.setFixedWidth(32)
+        self.sayfada_sonraki_butonu.clicked.connect(self.sayfada_sonrakini_bul)
+
+        self.sayfada_arama_kapat_butonu = QPushButton("✕")
+        self.sayfada_arama_kapat_butonu.setFixedWidth(32)
+        self.sayfada_arama_kapat_butonu.clicked.connect(self.sayfada_aramayi_kapat)
+
+        sayfada_arama_satiri = QHBoxLayout()
+        sayfada_arama_satiri.addWidget(self.sayfada_arama_kutusu)
+        sayfada_arama_satiri.addWidget(self.sayfada_onceki_butonu)
+        sayfada_arama_satiri.addWidget(self.sayfada_sonraki_butonu)
+        sayfada_arama_satiri.addWidget(self.sayfada_arama_kapat_butonu)
+
+        self.sayfada_arama_konteyneri = QWidget()
+        self.sayfada_arama_konteyneri.setLayout(sayfada_arama_satiri)
+        self.sayfada_arama_konteyneri.setVisible(False)
+
+        # Ctrl+F: her yerden (dialog odaktayken) arama cubugunu ac.
+        self.sayfada_bul_kisayolu = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.sayfada_bul_kisayolu.activated.connect(self.sayfada_aramayi_ac)
+
         self.icerik_kaydet_butonu = QPushButton("Icerigi Kaydet (Yeniden Parcala + Isle)")
         self.icerik_kaydet_butonu.clicked.connect(self.icerigi_kaydet)
 
@@ -308,6 +346,7 @@ class SayfaDetayDialogu(QDialog):
         layout.addWidget(self.tarih_etiketi)
         layout.addLayout(kategori_satiri)
         layout.addWidget(QLabel("Icerik:"))
+        layout.addWidget(self.sayfada_arama_konteyneri)
         layout.addWidget(self.icerik_kutusu)
         layout.addWidget(self.icerik_kaydet_butonu)
         layout.addWidget(self.yeniden_isle_butonu)
@@ -423,6 +462,78 @@ class SayfaDetayDialogu(QDialog):
         # olabilir - ikisini de tazeleyelim.
         self.sayfayi_yukle()
         self.grafigi_yukle()
+
+    def sayfada_aramayi_ac(self):
+        """Ctrl+F - arama cubugunu gosterir ve imleci oraya odaklar."""
+        self.sayfada_arama_konteyneri.setVisible(True)
+        self.sayfada_arama_kutusu.setFocus()
+        self.sayfada_arama_kutusu.selectAll()
+
+    def sayfada_aramayi_kapat(self):
+        """
+        "✕" butonu - arama cubugunu gizler ve icerikteki secili
+        (vurgulanmis) eslesmeyi temizler ki kapatinca ekranda vurgulu
+        metin kalmasin.
+        """
+        self.sayfada_arama_konteyneri.setVisible(False)
+        imlec = self.icerik_kutusu.textCursor()
+        imlec.clearSelection()
+        self.icerik_kutusu.setTextCursor(imlec)
+
+    def sayfada_aramayi_sifirla_ve_bul(self):
+        """
+        Arama kutusuna her yeni karakter yazildiginda cagrilir - imleci
+        icerigin EN BASINA alip ORADAN arayarak ILK eslesmeyi bulur.
+        Boyle yapmazsak (yani onceki aramanin kaldigi yerden devam
+        etseydik), kullanici arama metnini DEGISTIRDIGINDE beklenmedik
+        bir yerden sonuc gelebilirdi - her tus vurusunda BASTAN aramak
+        klasik "sayfada bul" cubuklarinin (tarayici, editor) davranisiyla
+        tutarli.
+        """
+        metin = self.sayfada_arama_kutusu.text()
+        if not metin:
+            self.sayfada_arama_kutusu.setStyleSheet("")
+            return
+
+        imlec = self.icerik_kutusu.textCursor()
+        imlec.movePosition(QTextCursor.MoveOperation.Start)
+        self.icerik_kutusu.setTextCursor(imlec)
+        self._sayfada_bul(metin, geriye_dogru=False)
+
+    def sayfada_sonrakini_bul(self):
+        metin = self.sayfada_arama_kutusu.text()
+        if metin:
+            self._sayfada_bul(metin, geriye_dogru=False)
+
+    def sayfada_oncekini_bul(self):
+        metin = self.sayfada_arama_kutusu.text()
+        if metin:
+            self._sayfada_bul(metin, geriye_dogru=True)
+
+    def _sayfada_bul(self, metin: str, geriye_dogru: bool):
+        """
+        QTextEdit.find(), imlecin BULUNDUGU konumdan ileriye (ya da
+        FindBackward bayragiyla geriye) dogru arar, bulursa eslesmeyi
+        SECILI hale getirip (gorunur alana kaydirarak) True doner.
+        Sonuna (ya da basina) gelip BULAMAZSA, klasik "sayfada bul"
+        cubuklarinin dongusel davranisiyla tutarli olmasi icin imleci
+        diger uca sarip BIR KEZ DAHA deniyoruz.
+        """
+        bayrak = QTextDocument.FindFlag.FindBackward if geriye_dogru else QTextDocument.FindFlag(0)
+        bulundu = self.icerik_kutusu.find(metin, bayrak)
+
+        if not bulundu:
+            imlec = self.icerik_kutusu.textCursor()
+            imlec.movePosition(
+                QTextCursor.MoveOperation.End if geriye_dogru else QTextCursor.MoveOperation.Start
+            )
+            self.icerik_kutusu.setTextCursor(imlec)
+            bulundu = self.icerik_kutusu.find(metin, bayrak)
+
+        # Bulunamadiysa arama kutusunu hafif kirmizimsi yap - GOOGLE
+        # Docs/tarayici "bul" cubuklarindaki gibi sessiz bir geri
+        # bildirim, ayrica bir mesaj kutusu acmaya gerek yok.
+        self.sayfada_arama_kutusu.setStyleSheet("" if bulundu else "background-color: #ffcccc;")
 
     def yeniden_isle(self):
         """
