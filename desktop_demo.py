@@ -802,6 +802,142 @@ class SayfalarSekmesi(QWidget):
         self.sayfalari_yukle()
 
 
+class KategorilerSekmesi(QWidget):
+    """
+    "Kategoriler" sekmesi: sayfalari WikiPage.kategori'ye gore gruplayip
+    gosterir - solda kategori listesi (kac sayfa icerdigiyle birlikte),
+    saginda secili kategorideki sayfalar. Ayri bir backend endpoint'i
+    GEREKMEZ - GET /pages zaten her sayfanin kategorisini donduruyor,
+    gruplama burada (istemci tarafinda) yapiliyor. Kategorisi olmayan
+    sayfalar "Kategorisiz" kovasina dusuyor.
+
+    Bir sayfaya cift tiklayinca (ya da "Detay Ac" ile) SayfalarSekmesi'nde
+    de kullanilan AYNI SayfaDetayDialogu acilir - kategori orada da
+    duzeltilebilir.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.yenile_butonu = QPushButton("Yenile")
+        self.yenile_butonu.clicked.connect(self.kategorileri_yukle)
+
+        self.kategori_listesi = QListWidget()
+        self.kategori_listesi.currentItemChanged.connect(self.kategori_secildi)
+
+        self.sayfa_listesi = QListWidget()
+        self.sayfa_listesi.itemDoubleClicked.connect(self.sayfa_detayini_ac)
+
+        self.detay_butonu = QPushButton("Detay Ac")
+        self.detay_butonu.clicked.connect(self.secili_sayfa_detayini_ac)
+
+        self.durum_etiketi = QLabel("Kategorileri gormek icin 'Yenile'ye bas")
+
+        # Iki sutunlu duzen: solda kategori listesi, saginda o
+        # kategorinin sayfalari - bir kategoriye tiklayinca sag taraf
+        # guncelleniyor.
+        sutunlar = QHBoxLayout()
+
+        sol_sutun = QVBoxLayout()
+        sol_sutun.addWidget(QLabel("Kategoriler:"))
+        sol_sutun.addWidget(self.kategori_listesi)
+
+        sag_sutun = QVBoxLayout()
+        sag_sutun.addWidget(QLabel("Sayfalar:"))
+        sag_sutun.addWidget(self.sayfa_listesi)
+        sag_sutun.addWidget(self.detay_butonu)
+
+        sutunlar.addLayout(sol_sutun, 1)
+        sutunlar.addLayout(sag_sutun, 2)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.yenile_butonu)
+        layout.addLayout(sutunlar)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+        # kategori adi -> o kategorideki sayfalarin (id, title, ...)
+        # sozlukleri - kategori_secildi'de tekrar API cagirmadan
+        # kullanilacak.
+        self._kategori_to_sayfalar: dict[str, list[dict]] = {}
+
+    def kategorileri_yukle(self):
+        self.durum_etiketi.setText("Yukleniyor...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.get(f"{BACKEND_URL}/pages", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        sayfalar = yanit.json()
+
+        # Sayfalari kategoriye gore grupla - kategorisi olmayanlar
+        # (None/bos) "Kategorisiz" kovasina dusuyor.
+        self._kategori_to_sayfalar = {}
+        for sayfa in sayfalar:
+            kategori = sayfa.get("kategori") or "Kategorisiz"
+            self._kategori_to_sayfalar.setdefault(kategori, []).append(sayfa)
+
+        self.kategori_listesi.clear()
+        self.sayfa_listesi.clear()
+
+        # Kategorileri sayfa sayisina gore AZALAN sirada goster - en
+        # kalabalik kategori en ustte, gozden kacmasin.
+        for kategori, bu_kategorideki_sayfalar in sorted(
+            self._kategori_to_sayfalar.items(), key=lambda kv: -len(kv[1])
+        ):
+            metin = f"{kategori} ({len(bu_kategorideki_sayfalar)})"
+            oge = QListWidgetItem(metin)
+            oge.setData(Qt.ItemDataRole.UserRole, kategori)
+            self.kategori_listesi.addItem(oge)
+
+        self.durum_etiketi.setText(
+            f"{len(self._kategori_to_sayfalar)} kategori, {len(sayfalar)} sayfa"
+        )
+
+    def kategori_secildi(self, oge: QListWidgetItem, _onceki_oge: QListWidgetItem = None):
+        """
+        kategori_listesi.currentItemChanged sinyaline baglanmis - bir
+        kategoriye tiklaninca (ya da ok tuslariyla secim degisince) sag
+        taraftaki sayfa listesini gunceller.
+        """
+        self.sayfa_listesi.clear()
+
+        if oge is None:
+            return
+
+        kategori = oge.data(Qt.ItemDataRole.UserRole)
+        bu_kategorideki_sayfalar = self._kategori_to_sayfalar.get(kategori, [])
+
+        for sayfa in bu_kategorideki_sayfalar:
+            metin = f"#{sayfa['id']} - {sayfa['title']}"
+            yeni_oge = QListWidgetItem(metin)
+            yeni_oge.setData(Qt.ItemDataRole.UserRole, sayfa["id"])
+            self.sayfa_listesi.addItem(yeni_oge)
+
+    def sayfa_detayini_ac(self, oge: QListWidgetItem):
+        sayfa_id = oge.data(Qt.ItemDataRole.UserRole)
+        dialog = SayfaDetayDialogu(sayfa_id, self)
+        dialog.exec()
+        # Kategori dialogda degismis olabilir (Kategoriyi Guncelle ile) -
+        # listeyi yenileyip sayfanin GUNCEL kategorisi altinda gorunmesini
+        # sagliyoruz.
+        self.kategorileri_yukle()
+
+    def secili_sayfa_detayini_ac(self):
+        oge = self.sayfa_listesi.currentItem()
+        if oge is None:
+            self.durum_etiketi.setText("Once listeden bir sayfa sec")
+            return
+        self.sayfa_detayini_ac(oge)
+
+
 class GlobalGrafSekmesi(QWidget):
     """
     "Global Graf" sekmesi: sayfalar arasi baglanti haritasi (Katman 2) -
@@ -918,8 +1054,10 @@ class GlobalGrafSekmesi(QWidget):
 class AnaPencere(QMainWindow):
     """
     Uygulamanin ANA penceresi. Icerigi bir QTabWidget (sekmeler) -
-    "Sohbet", "Ara" ve "Sayfalar" - olusturuyor, her sekme kendi widget
-    class'inda (SohbetSekmesi, AramaSekmesi, SayfalarSekmesi) yasiyor.
+    "Sohbet", "Ara", "Sayfalar", "Kategoriler" ve "Global Graf" -
+    olusturuyor, her sekme kendi widget class'inda (SohbetSekmesi,
+    AramaSekmesi, SayfalarSekmesi, KategorilerSekmesi, GlobalGrafSekmesi)
+    yasiyor.
     """
 
     def __init__(self):
@@ -934,6 +1072,7 @@ class AnaPencere(QMainWindow):
         sekmeler.addTab(SohbetSekmesi(), "Sohbet")
         sekmeler.addTab(AramaSekmesi(), "Ara")
         sekmeler.addTab(SayfalarSekmesi(), "Sayfalar")
+        sekmeler.addTab(KategorilerSekmesi(), "Kategoriler")
         sekmeler.addTab(GlobalGrafSekmesi(), "Global Graf")
 
         ana_layout = QVBoxLayout()
