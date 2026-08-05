@@ -134,9 +134,58 @@ class SayfaGrafiCevabi(BaseModel):
     sayfa_id: int
     kavramlar: list[GraphKavram]
     iliskiler: list[GraphIliski]
-    
-    
-    
+
+
+class KavramOzet(BaseModel):
+    """
+    GET /concepts listesindeki HER satir icin - kavram-bazli gezinme
+    ekraninda aranabilir/secilebilir liste olarak kullanilir.
+    """
+    id: int
+    standart_isim: str
+    tip: str
+
+    class Config:
+        from_attributes = True
+
+
+class KavramGorulduguSayfa(BaseModel):
+    """Bir kavramin GORULDUGU tek bir SemanticUnit'i (ve ait oldugu sayfayi) temsil eder."""
+    unit_id: int
+    page_id: int
+    sayfa_basligi: str
+    icerik: str
+
+
+class IliskiliKavram(BaseModel):
+    """
+    Bir kavrama ConceptRelation uzerinden BAGLI baska bir kavram.
+    yon: "giden" (bu kavram -> digeri) ya da "gelen" (digeri -> bu
+    kavram) - ConceptRelation yonlu oldugu icin ikisi de ayri ayri
+    listelenir.
+    """
+    concept_id: int
+    standart_isim: str
+    tip: str
+    iliski_tipi: str
+    yon: str
+
+
+class KavramDetayCevabi(BaseModel):
+    """
+    GET /concepts/{id} - bir kavramin TAM detayi: temel bilgisi, takma
+    adlari, goruldugu TUM sayfalar/parcalar, ve ILISKILI oldugu diger
+    kavramlar (her iki yonde de).
+    """
+    id: int
+    standart_isim: str
+    tip: str
+    takma_adlar: list[str]
+    goruldugu_sayfalar: list[KavramGorulduguSayfa]
+    iliskili_kavramlar: list[IliskiliKavram]
+
+
+
     
 class GlobalGrafYenidenHesaplaCevabi(BaseModel):
     olusturulan_baglanti_sayisi: int

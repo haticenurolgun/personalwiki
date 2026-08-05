@@ -960,6 +960,174 @@ class KategorilerSekmesi(QWidget):
         self.sayfa_detayini_ac(oge)
 
 
+class KavramlarSekmesi(QWidget):
+    """
+    "Kavramlar" sekmesi: KAVRAM-merkezli gezinme - GET /concepts ve
+    GET /concepts/{id}. KategorilerSekmesi'nden FARKLI: o sayfa
+    (WikiPage) merkezli gruplama yapar, bu sekme ise dogrudan
+    ConceptNode'lari gezmeyi saglar.
+
+    Sol tarafta TUM kavramlarin aranabilir listesi. Bir kavram
+    secilince sagda: tip/takma adlar, GORULDUGU sayfalar (cift
+    tiklayinca SayfaDetayDialogu acilir) ve ConceptRelation uzerinden
+    ILISKILI kavramlar (cift tiklayinca O kavrama ATLANIR - boylece
+    kavramdan kavrama, graf uzerinde gezer gibi, metin ile gezinilebilir).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.yenile_butonu = QPushButton("Yenile")
+        self.yenile_butonu.clicked.connect(self.kavramlari_yukle)
+
+        self.arama_kutusu = QLineEdit()
+        self.arama_kutusu.setPlaceholderText("Kavram ara...")
+        self.arama_kutusu.textChanged.connect(self.listeyi_filtrele)
+
+        self.kavram_listesi = QListWidget()
+        self.kavram_listesi.currentItemChanged.connect(self.kavram_secildi)
+
+        self.detay_etiketi = QLabel("Bir kavram sec")
+        self.detay_etiketi.setWordWrap(True)
+
+        self.iliskili_listesi = QListWidget()
+        self.iliskili_listesi.itemDoubleClicked.connect(self.iliskili_kavrama_git)
+
+        self.sayfa_listesi = QListWidget()
+        self.sayfa_listesi.itemDoubleClicked.connect(self.sayfa_detayini_ac)
+
+        self.durum_etiketi = QLabel("Kavramlari gormek icin 'Yenile'ye bas")
+
+        sol_sutun = QVBoxLayout()
+        sol_sutun.addWidget(self.arama_kutusu)
+        sol_sutun.addWidget(self.kavram_listesi)
+
+        sag_sutun = QVBoxLayout()
+        sag_sutun.addWidget(self.detay_etiketi)
+        sag_sutun.addWidget(QLabel("Iliskili Kavramlar (cift tikla -> git):"))
+        sag_sutun.addWidget(self.iliskili_listesi)
+        sag_sutun.addWidget(QLabel("Goruldugu Sayfalar (cift tikla -> detay ac):"))
+        sag_sutun.addWidget(self.sayfa_listesi)
+
+        sutunlar = QHBoxLayout()
+        sutunlar.addLayout(sol_sutun, 1)
+        sutunlar.addLayout(sag_sutun, 2)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.yenile_butonu)
+        layout.addLayout(sutunlar)
+        layout.addWidget(self.durum_etiketi)
+        self.setLayout(layout)
+
+        # Filtrelemede tekrar API cagirmamak icin TUM kavramlari burada
+        # sakliyoruz - GET /concepts sadece "Yenile"de bir kere cagrilir.
+        self._tum_kavramlar = []
+
+    def kavramlari_yukle(self):
+        self.durum_etiketi.setText("Yukleniyor...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.get(f"{BACKEND_URL}/concepts", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        self._tum_kavramlar = yanit.json()
+        self._kavram_listesini_doldur(self._tum_kavramlar)
+        self.durum_etiketi.setText(f"{len(self._tum_kavramlar)} kavram")
+
+    def _kavram_listesini_doldur(self, kavramlar):
+        self.kavram_listesi.clear()
+        for kavram in kavramlar:
+            oge = QListWidgetItem(f"{kavram['standart_isim']} ({kavram['tip']})")
+            oge.setData(Qt.ItemDataRole.UserRole, kavram["id"])
+            self.kavram_listesi.addItem(oge)
+
+    def listeyi_filtrele(self, metin):
+        """
+        Arama kutusuna yazildikca (her tus vurusunda) listeyi YENIDEN
+        API'ye sormadan, bellekteki self._tum_kavramlar uzerinden
+        filtreler - kucuk/buyuk harf ve Turkce karakter farki
+        gozetmeden basit bir ICERME kontrolu yeterli (tam bir arama
+        motoru degil, sadece hizli filtreleme).
+        """
+        metin_kucuk = metin.strip().lower()
+        if not metin_kucuk:
+            self._kavram_listesini_doldur(self._tum_kavramlar)
+            return
+        filtrelenmis = [
+            k for k in self._tum_kavramlar if metin_kucuk in k["standart_isim"].lower()
+        ]
+        self._kavram_listesini_doldur(filtrelenmis)
+
+    def kavram_secildi(self, oge: QListWidgetItem, _onceki_oge: QListWidgetItem = None):
+        if oge is None:
+            return
+        kavram_id = oge.data(Qt.ItemDataRole.UserRole)
+        self._kavram_detayini_goster(kavram_id)
+
+    def _kavram_detayini_goster(self, kavram_id):
+        try:
+            yanit = requests.get(f"{BACKEND_URL}/concepts/{kavram_id}", timeout=10)
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return
+
+        detay = yanit.json()
+
+        takma_adlar_metni = ", ".join(detay["takma_adlar"]) if detay["takma_adlar"] else "yok"
+        self.detay_etiketi.setText(
+            f"<b>{detay['standart_isim']}</b>  ({detay['tip']})<br>Takma adlar: {takma_adlar_metni}"
+        )
+
+        self.iliskili_listesi.clear()
+        for iliskili in detay["iliskili_kavramlar"]:
+            ok = "→" if iliskili["yon"] == "giden" else "←"
+            metin = f"{ok} [{iliskili['iliski_tipi']}] {iliskili['standart_isim']} ({iliskili['tip']})"
+            oge = QListWidgetItem(metin)
+            oge.setData(Qt.ItemDataRole.UserRole, iliskili["concept_id"])
+            self.iliskili_listesi.addItem(oge)
+
+        self.sayfa_listesi.clear()
+        for sayfa in detay["goruldugu_sayfalar"]:
+            kisa_icerik = sayfa["icerik"].strip().replace("\n", " ")[:80]
+            metin = f"#{sayfa['page_id']} - {sayfa['sayfa_basligi']}: {kisa_icerik}"
+            oge = QListWidgetItem(metin)
+            oge.setData(Qt.ItemDataRole.UserRole, sayfa["page_id"])
+            self.sayfa_listesi.addItem(oge)
+
+    def iliskili_kavrama_git(self, oge: QListWidgetItem):
+        """
+        Iliskili kavramlar listesinde cift tiklaninca, o kavrama
+        ATLAR - once sol listede (goruntudeyse) secili hale getirir ki
+        kullanici nerede oldugunu kaybetmesin; sol listede yoksa (orn.
+        arama kutusuyla filtrelenmisti) dogrudan detayini gosterir.
+        """
+        kavram_id = oge.data(Qt.ItemDataRole.UserRole)
+
+        for i in range(self.kavram_listesi.count()):
+            liste_ogesi = self.kavram_listesi.item(i)
+            if liste_ogesi.data(Qt.ItemDataRole.UserRole) == kavram_id:
+                self.kavram_listesi.setCurrentItem(liste_ogesi)
+                return
+
+        self._kavram_detayini_goster(kavram_id)
+
+    def sayfa_detayini_ac(self, oge: QListWidgetItem):
+        sayfa_id = oge.data(Qt.ItemDataRole.UserRole)
+        dialog = SayfaDetayDialogu(sayfa_id, self)
+        dialog.exec()
+
+
 class GlobalGrafSekmesi(QWidget):
     """
     "Global Graf" sekmesi: sayfalar arasi baglanti haritasi (Katman 2) -
@@ -1092,10 +1260,10 @@ class GlobalGrafSekmesi(QWidget):
 class AnaPencere(QMainWindow):
     """
     Uygulamanin ANA penceresi. Icerigi bir QTabWidget (sekmeler) -
-    "Sohbet", "Ara", "Sayfalar", "Kategoriler" ve "Global Graf" -
-    olusturuyor, her sekme kendi widget class'inda (SohbetSekmesi,
-    AramaSekmesi, SayfalarSekmesi, KategorilerSekmesi, GlobalGrafSekmesi)
-    yasiyor.
+    "Sohbet", "Ara", "Sayfalar", "Kategoriler", "Kavramlar" ve
+    "Global Graf" - olusturuyor, her sekme kendi widget class'inda
+    (SohbetSekmesi, AramaSekmesi, SayfalarSekmesi, KategorilerSekmesi,
+    KavramlarSekmesi, GlobalGrafSekmesi) yasiyor.
     """
 
     def __init__(self):
@@ -1111,6 +1279,7 @@ class AnaPencere(QMainWindow):
         sekmeler.addTab(AramaSekmesi(), "Ara")
         sekmeler.addTab(SayfalarSekmesi(), "Sayfalar")
         sekmeler.addTab(KategorilerSekmesi(), "Kategoriler")
+        sekmeler.addTab(KavramlarSekmesi(), "Kavramlar")
         sekmeler.addTab(GlobalGrafSekmesi(), "Global Graf")
 
         ana_layout = QVBoxLayout()
