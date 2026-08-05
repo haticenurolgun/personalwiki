@@ -8,9 +8,9 @@ GETIRIR/LISTELER/INDEXLER.
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.schemas import WikipageCevap, IndexCevabi, SayfaGrafiCevabi, GraphKavram, GraphIliski, SiniflandirmaCevabi, KategoriGuncelle
+from app.models.schemas import WikipageCevap, IndexCevabi, SayfaGrafiCevabi, GraphKavram, GraphIliski, SiniflandirmaCevabi, KategoriGuncelle, IcerikGuncelle
 from app.services.graph_servisi import sayfa_grafini_hesapla
 from app.services.classifier import sayfa_siniflandir
 from app.database import veritabani_oturumu_getir
@@ -30,6 +30,101 @@ from app.embeddings.embedding_servisi import (
 )
 
 router = APIRouter(prefix="/pages", tags=["Sayfalar"])
+
+
+async def turetilmis_kavram_verisini_temizle(db: AsyncSession, unit_idler: list[int]) -> None:
+    """
+    Verilen unit_id'lerde GORULEN kavramlarin KavramGorulme kayitlarini
+    siler; bu unit'ler DISINDA hicbir yerde gorulmeyen kavramlari
+    (ConceptRelation'lariyla birlikte) TAMAMEN siler, baska sayfalarda
+    da gorulenlere DOKUNMAZ. Chroma'daki ilgili vektorleri de temizler.
+
+    NOT: SemanticUnit satirlarinin KENDISINE ya da WikiPage'e DOKUNMAZ -
+    cagiran taraf onlari kendi ihtiyacina gore ayrica halleder
+    (sayfayi_sil'de WikiPage silinince cascade ile zaten gider;
+    icerigi_guncelle'de ise SemanticUnit satirlari ayrica silinip
+    yeniden olusturulur). Hem sayfayi_sil HEM icerigi_guncelle bu
+    fonksiyonu PAYLASIR - ikisi de "bu sayfaya ait turetilmis veriyi
+    yok et" ihtiyacini tasir, sadece SONRASINDA yaptiklari farkli
+    (biri sayfayi da siler, digeri sayfayi yeni icerikle yeniden indexler).
+    """
+    if not unit_idler:
+        return
+
+    # Bu unit'lerde GORULEN tum ConceptNode id'lerini bul (tekrarsiz).
+    gorulme_sonucu = await db.execute(
+        select(KavramGorulme.concept_node_id)
+        .where(KavramGorulme.unit_id.in_(unit_idler))
+        .distinct()
+    )
+    etkilenen_node_idler = [satir[0] for satir in gorulme_sonucu.all()]
+
+    # Komple silinen ConceptNode'larin id'lerini topluyoruz - asagida
+    # Chroma'daki concept_names koleksiyonundan da silmek icin lazim.
+    silinen_node_idler = []
+
+    for node_id in etkilenen_node_idler:
+        # Bu kavram, silinecek unit'ler DISINDA baska bir unit'te de
+        # goruluyor mu? Yani baska bir sayfada da geciyor mu?
+        baska_gorulme_sonucu = await db.execute(
+            select(KavramGorulme).where(
+                KavramGorulme.concept_node_id == node_id,
+                KavramGorulme.unit_id.notin_(unit_idler),
+            )
+        )
+        baska_yerde_de_var = baska_gorulme_sonucu.scalars().first()
+
+        if baska_yerde_de_var is None:
+            # Sadece bu unit'lerde gorulmus - ConceptNode'u komple sil.
+            # Once ona bagli ConceptRelation'lari silmemiz lazim, yoksa
+            # foreign key hatasi aliriz (kaynak_id/hedef_id bu node'a
+            # isaret ediyor olabilir).
+            iliski_sonucu = await db.execute(
+                select(ConceptRelation).where(
+                    (ConceptRelation.kaynak_id == node_id) |
+                    (ConceptRelation.hedef_id == node_id)
+                )
+            )
+            for iliski in iliski_sonucu.scalars().all():
+                await db.delete(iliski)
+
+            # KavramGorulme kayitlarini sil (zaten hepsi bu unit'lere ait,
+            # cunku "baska yerde yok" demek biraz once dogruladik).
+            tum_gorulme_sonucu = await db.execute(
+                select(KavramGorulme).where(KavramGorulme.concept_node_id == node_id)
+            )
+            for gorulme in tum_gorulme_sonucu.scalars().all():
+                await db.delete(gorulme)
+
+            # ConceptNode'un kendisini sil - cascade sayesinde
+            # KavramTakmaAdi kayitlari da otomatik gidecek.
+            node_sonucu = await db.execute(
+                select(ConceptNode).where(ConceptNode.id == node_id)
+            )
+            node = node_sonucu.scalars().first()
+            if node is not None:
+                await db.delete(node)
+                silinen_node_idler.append(node_id)
+        else:
+            # Baska sayfada da goruluyor - sadece BU unit'lere ait
+            # KavramGorulme kayitlarini sil, node'a dokunma.
+            bu_unitlerdeki_gorulme_sonucu = await db.execute(
+                select(KavramGorulme).where(
+                    KavramGorulme.concept_node_id == node_id,
+                    KavramGorulme.unit_id.in_(unit_idler),
+                )
+            )
+            for gorulme in bu_unitlerdeki_gorulme_sonucu.scalars().all():
+                await db.delete(gorulme)
+
+    # Chroma'daki vektorleri sil (senkron cagri, thread'e atiyoruz).
+    await asyncio.to_thread(parcalari_sil, unit_idler)
+
+    # Komple silinen ConceptNode'larin Chroma'daki concept_names
+    # kaydini da sil - yoksa artik SQLde olmayan bir node, embedding
+    # aramasinda hala "eslesme" olarak cikmaya devam eder (hayalet kayit).
+    if silinen_node_idler:
+        await asyncio.to_thread(kavram_sil, silinen_node_idler)
 
 
 @router.get("", response_model=list[WikipageCevap])
@@ -261,6 +356,96 @@ async def kategoriyi_guncelle(
     return sayfa
 
 
+@router.put("/{sayfa_id}/content", response_model=WikipageCevap)
+async def icerigi_guncelle(
+    sayfa_id: int,
+    istek: IcerikGuncelle,
+    db: AsyncSession = Depends(veritabani_oturumu_getir),
+):
+    """
+    Bir WikiPage'in icerigini GUNCELLER ve TUM turetilmis veriyi
+    SIFIRDAN yeniden kurar - eski SemanticUnit'ler yeni icerikle ARTIK
+    UYUSMADIGI icin (baslik/bolum sinirlari degismis olabilir) sadece
+    icerigi degistirip eski parcalari oldugu gibi birakmak, aramada ve
+    kavram grafiginde YANLIS/eski metinlerin gorunmesine yol acardi.
+
+    Akis, sources.py'deki otomatik yukleme akisiyla AYNI adimlari
+    izler: eski turetilmis veriyi temizle -> yontem_sec ile yeniden
+    parcala -> embed -> siniflandir -> kavram cikar. Bu, sayfa BUYUKSE
+    (cok parca) birkac Gemini cagrisi (siniflandirma + kavram cikarma)
+    demektir - kucuk bir duzeltme icin bile TAM yeniden isleme
+    gerekiyor, cunku "sadece degisen kismi isle" gibi kismi bir yontem
+    YOK (chunking, sayfanin TAMAMINA bakarak karar veriyor).
+
+    Global graf (SayfaBaglantisi/SayfaIliskisi) OTOMATIK yeniden
+    hesaplanmaz - digerleri gibi (extract-concepts) bu da ayri bir
+    POST /graph/global/yeniden-hesapla cagrisi gerektirir.
+    """
+    # Import BURADA yapiliyor - concepts.py, pages.py'yi import ETMIYOR
+    # (tersi yon zaten sources.py'de var), o yuzden dongusel bagimlilik
+    # riski yok, ama modul seviyesinde en ustte tutmak yerine burada
+    # tutmak, "bu import SADECE bu endpoint icin gerekli" niyetini
+    # daha net kiliyor.
+    from app.routers.concepts import kavramlari_uygula
+
+    sonuc = await db.execute(select(WikiPage).where(WikiPage.id == sayfa_id))
+    sayfa = sonuc.scalars().first()
+
+    if sayfa is None:
+        raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
+
+    # 1) Eski turetilmis veriyi (varsa) temizle - hem KavramGorulme/
+    #    ConceptRelation/ConceptNode (paylasilan yardimci fonksiyon)
+    #    hem SemanticUnit satirlarinin kendisi.
+    eski_unit_sonucu = await db.execute(
+        select(SemanticUnit.id).where(SemanticUnit.page_id == sayfa_id)
+    )
+    eski_unit_idler = [satir[0] for satir in eski_unit_sonucu.all()]
+
+    if eski_unit_idler:
+        await turetilmis_kavram_verisini_temizle(db, eski_unit_idler)
+        await db.execute(delete(SemanticUnit).where(SemanticUnit.page_id == sayfa_id))
+
+    # 2) Yeni icerigi kaydet.
+    sayfa.content = istek.content
+    await db.flush()
+
+    # 3) Yeni icerigi ICERIK TURUNE gore EN UYGUN yontemle yeniden parcala.
+    yontem_adi, parcalar = await asyncio.to_thread(yontem_sec, sayfa.content)
+
+    yeni_unitler = []
+    for sira, parca in enumerate(parcalar):
+        yeni_unit = SemanticUnit(
+            page_id=sayfa.id,
+            baslik=parca.baslik,
+            icerik=parca.icerik,
+            seviye=parca.seviye,
+            sira=sira,
+        )
+        db.add(yeni_unit)
+        yeni_unitler.append(yeni_unit)
+
+    await db.commit()
+
+    for unit in yeni_unitler:
+        await db.refresh(unit)
+
+    # 4) Her yeni parcayi embed et.
+    await asyncio.gather(*[
+        asyncio.to_thread(parcayi_kaydet, unit.id, unit.page_id, unit.icerik)
+        for unit in yeni_unitler
+    ])
+
+    # 5) Otomatik siniflandirma + kavram cikarma - sources.py'deki
+    #    otomatik yukleme akisiyla AYNI paylasilan fonksiyonlar.
+    await siniflandirmayi_uygula(db, sayfa)
+    await kavramlari_uygula(db, yeni_unitler)
+    await db.commit()
+
+    await db.refresh(sayfa)
+    return sayfa
+
+
 @router.delete("/{sayfa_id}")
 async def sayfayi_sil(
     sayfa_id: int,
@@ -283,90 +468,17 @@ async def sayfayi_sil(
     if sayfa is None:
         raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
 
-    # 1) Bu sayfaya ait SemanticUnit id'lerini topla - hem Chroma
-    #    silme islemi hem de KavramGorulme sorgusu icin lazim.
+    # 1) Bu sayfaya ait SemanticUnit id'lerini topla - turetilmis_
+    #    kavram_verisini_temizle bunlari kullanarak KavramGorulme/
+    #    ConceptRelation/ConceptNode temizligini yapiyor.
     unit_sonucu = await db.execute(
         select(SemanticUnit.id).where(SemanticUnit.page_id == sayfa_id)
     )
     unit_idler = [satir[0] for satir in unit_sonucu.all()]
 
-    if unit_idler:
-        # 2) Bu unit'lerde GORULEN tum ConceptNode id'lerini bul (tekrarsiz).
-        gorulme_sonucu = await db.execute(
-            select(KavramGorulme.concept_node_id)
-            .where(KavramGorulme.unit_id.in_(unit_idler))
-            .distinct()
-        )
-        etkilenen_node_idler = [satir[0] for satir in gorulme_sonucu.all()]
+    await turetilmis_kavram_verisini_temizle(db, unit_idler)
 
-        # Komple silinen ConceptNode'larin id'lerini topluyoruz - asagida
-        # Chroma'daki concept_names koleksiyonundan da silmek icin lazim.
-        silinen_node_idler = []
-
-        for node_id in etkilenen_node_idler:
-            # 3) Bu kavram, silinecek unit'ler DISINDA baska bir unit'te
-            #    de goruluyor mu? Yani baska bir sayfada da geciyor mu?
-            baska_gorulme_sonucu = await db.execute(
-                select(KavramGorulme).where(
-                    KavramGorulme.concept_node_id == node_id,
-                    KavramGorulme.unit_id.notin_(unit_idler),
-                )
-            )
-            baska_yerde_de_var = baska_gorulme_sonucu.scalars().first()
-
-            if baska_yerde_de_var is None:
-                # Sadece bu sayfada gorulmus - ConceptNode'u komple sil.
-                # Once ona bagli ConceptRelation'lari silmemiz lazim,
-                # yoksa foreign key hatasi aliriz (kaynak_id/hedef_id
-                # bu node'a isaret ediyor olabilir).
-                iliski_sonucu = await db.execute(
-                    select(ConceptRelation).where(
-                        (ConceptRelation.kaynak_id == node_id) |
-                        (ConceptRelation.hedef_id == node_id)
-                    )
-                )
-                for iliski in iliski_sonucu.scalars().all():
-                    await db.delete(iliski)
-
-                # KavramGorulme kayitlarini sil (zaten hepsi bu sayfaya ait,
-                # cunku "baska yerde yok" demek biraz once dogruladik).
-                tum_gorulme_sonucu = await db.execute(
-                    select(KavramGorulme).where(KavramGorulme.concept_node_id == node_id)
-                )
-                for gorulme in tum_gorulme_sonucu.scalars().all():
-                    await db.delete(gorulme)
-
-                # ConceptNode'un kendisini sil - cascade sayesinde
-                # KavramTakmaAdi kayitlari da otomatik gidecek.
-                node_sonucu = await db.execute(
-                    select(ConceptNode).where(ConceptNode.id == node_id)
-                )
-                node = node_sonucu.scalars().first()
-                if node is not None:
-                    await db.delete(node)
-                    silinen_node_idler.append(node_id)
-            else:
-                # Baska sayfada da goruluyor - sadece BU sayfaya ait
-                # KavramGorulme kayitlarini sil, node'a dokunma.
-                bu_sayfadaki_gorulme_sonucu = await db.execute(
-                    select(KavramGorulme).where(
-                        KavramGorulme.concept_node_id == node_id,
-                        KavramGorulme.unit_id.in_(unit_idler),
-                    )
-                )
-                for gorulme in bu_sayfadaki_gorulme_sonucu.scalars().all():
-                    await db.delete(gorulme)
-
-        # 4) Chroma'daki vektorleri sil (senkron cagri, thread'e atiyoruz).
-        await asyncio.to_thread(parcalari_sil, unit_idler)
-
-        # 5) Komple silinen ConceptNode'larin Chroma'daki concept_names
-        #    kaydini da sil - yoksa artik SQLde olmayan bir node, embedding
-        #    aramasinda hala "eslesme" olarak cikmaya devam eder (hayalet kayit).
-        if silinen_node_idler:
-            await asyncio.to_thread(kavram_sil, silinen_node_idler)
-
-    # 5) Son olarak WikiPage'i sil - cascade sayesinde Source ve
+    # 2) Son olarak WikiPage'i sil - cascade sayesinde Source ve
     #    SemanticUnit satirlari otomatik silinecek.
     await db.delete(sayfa)
     await db.commit()

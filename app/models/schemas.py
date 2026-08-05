@@ -117,6 +117,15 @@ class KategoriGuncelle(BaseModel):
     kategori: str
 
 
+class IcerikGuncelle(BaseModel):
+    """
+    PUT /pages/{id}/content endpoint'ine gonderilmesi gereken govde.
+    Sayfanin TAM yeni icerigi (eskisinin YERINE gecer, kismi/diff
+    guncelleme degildir).
+    """
+    content: str
+
+
 
 class GraphKavram(BaseModel):
     id: int

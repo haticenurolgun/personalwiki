@@ -268,8 +268,13 @@ class SayfaDetayDialogu(QDialog):
         kategori_satiri.addWidget(self.kategori_kutusu)
         kategori_satiri.addWidget(self.kategori_guncelle_butonu)
 
+        # ARTIK DUZENLENEBILIR (eskiden salt-okunurdu) - kullanici
+        # icerigi burada dogrudan degistirip "Icerigi Kaydet" ile
+        # PUT /pages/{id}/content'e gonderebilir.
         self.icerik_kutusu = QTextEdit()
-        self.icerik_kutusu.setReadOnly(True)
+
+        self.icerik_kaydet_butonu = QPushButton("Icerigi Kaydet (Yeniden Parcala + Isle)")
+        self.icerik_kaydet_butonu.clicked.connect(self.icerigi_kaydet)
 
         self.yeniden_isle_butonu = QPushButton("Yeniden Isle (Siniflandir + Kavram Cikar)")
         self.yeniden_isle_butonu.clicked.connect(self.yeniden_isle)
@@ -304,6 +309,7 @@ class SayfaDetayDialogu(QDialog):
         layout.addLayout(kategori_satiri)
         layout.addWidget(QLabel("Icerik:"))
         layout.addWidget(self.icerik_kutusu)
+        layout.addWidget(self.icerik_kaydet_butonu)
         layout.addWidget(self.yeniden_isle_butonu)
         layout.addWidget(QLabel("Kavram Grafigi:"))
         layout.addWidget(self.grafik_listesi)
@@ -359,6 +365,64 @@ class SayfaDetayDialogu(QDialog):
             return
 
         self.durum_etiketi.setText("Kategori guncellendi")
+
+    def icerigi_kaydet(self):
+        """
+        PUT /pages/{id}/content - sayfanin icerigini icerik_kutusu'ndaki
+        GUNCEL metinle degistirir. Bu, TUM eski parcalari/kavramlari
+        silip yeni icerigi SIFIRDAN yeniden isler (bkz. pages.py
+        icerigi_guncelle docstring'i) - yani mevcut kavram baglantilari
+        kaybolur ve LLM cagrilari (siniflandirma + kavram cikarma)
+        tekrar tetiklenir. Bu yuzden onceden ONAY istiyoruz - sayfayi_
+        sil'deki ayni "geri alinamaz islem" desenini takip ediyor.
+        """
+        yeni_icerik = self.icerik_kutusu.toPlainText()
+        if not yeni_icerik.strip():
+            self.durum_etiketi.setText("Icerik bos olamaz")
+            return
+
+        onay = QMessageBox.question(
+            self,
+            "Icerigi Kaydet",
+            "Icerigi kaydetmek, bu sayfanin TUM parcalarini ve kavram "
+            "baglantilarini SIFIRDAN yeniden olusturacak (mevcut kavram "
+            "grafigi kaybolur, siniflandirma + kavram cikarma tekrar "
+            "calisir - LLM cagrisi icerir, biraz surebilir).\n\nDevam edilsin mi?",
+        )
+        if onay != QMessageBox.StandardButton.Yes:
+            return
+
+        self.icerik_kaydet_butonu.setEnabled(False)
+        self.durum_etiketi.setText("Kaydediliyor (yeniden parcalaniyor + isleniyor, biraz surebilir)...")
+        QApplication.processEvents()
+
+        try:
+            yanit = requests.put(
+                f"{BACKEND_URL}/pages/{self.sayfa_id}/content",
+                json={"content": yeni_icerik},
+                # Chunking + embed + siniflandirma + kavram cikarma TEK
+                # istekte - PDF yukleme ile ayni buyuklukte bir islem
+                # (bkz. sources.py pdf_ekle timeout'u), o yuzden ayni
+                # guvenlik payi.
+                timeout=300,
+            )
+            yanit.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            self.durum_etiketi.setText("Backend'e baglanilamadi")
+            self.icerik_kaydet_butonu.setEnabled(True)
+            return
+        except requests.exceptions.RequestException as hata:
+            self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            self.icerik_kaydet_butonu.setEnabled(True)
+            return
+
+        self.icerik_kaydet_butonu.setEnabled(True)
+        self.durum_etiketi.setText("Icerik kaydedildi, yeniden islendi")
+
+        # Kategori (otomatik siniflandirma) ve kavram grafigi degismis
+        # olabilir - ikisini de tazeleyelim.
+        self.sayfayi_yukle()
+        self.grafigi_yukle()
 
     def yeniden_isle(self):
         """
