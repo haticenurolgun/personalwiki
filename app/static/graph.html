@@ -27,6 +27,13 @@
         <input type="number" id="sayfa_id_girdisi" value="1" min="1">
     </span>
 
+    <span id="tipli_iliski_alani" style="display: none;">
+        <label>
+            <input type="checkbox" id="tipli_iliski_kutusu" onchange="grafiGetir()">
+            Tipli iliskileri de goster (ONKOSUL, KULLANIR, ...)
+        </label>
+    </span>
+
     <button onclick="grafiGetir()">Getir</button>
 
     <div id="hata_mesaji"></div>
@@ -37,7 +44,9 @@
         function modDegisti() {
             const mod = document.getElementById("mod_secici").value;
             const sayfaIdAlani = document.getElementById("sayfa_id_alani");
+            const tipliIliskiAlani = document.getElementById("tipli_iliski_alani");
             sayfaIdAlani.style.display = (mod === "global") ? "none" : "inline";
+            tipliIliskiAlani.style.display = (mod === "global") ? "inline" : "none";
         }
 
         async function grafiGetir() {
@@ -113,14 +122,40 @@
                 };
             });
 
-            const kenarlar = veri.baglantilar.map(function(baglanti) {
+            // Yonsuz "ortak kavram" baglantilari (SayfaBaglantisi) - gri,
+            // oksuz cizgi.
+            const ortakKavramKenarlari = veri.baglantilar.map(function(baglanti) {
                 return {
                     from: baglanti.sayfa_id_1,
                     to: baglanti.sayfa_id_2,
                     label: baglanti.ortak_kavram_ismi,
-                    arrows: ""
+                    arrows: "",
+                    color: "#888"
                 };
             });
+
+            // Yonlu/tipli iliskiler (SayfaIliskisi) - ConceptRelation'a
+            // dayali, ok'lu ve FARKLI renkte (mavi). VARSAYILAN OLARAK
+            // KAPALI - ortak kavram baglantilarinin uzerine binince
+            // graf hizla okunmaz hale geliyor (cok fazla capraz kenar).
+            // Kullanici isterse kutucugu isaretleyip acabilir.
+            const tipliIliskiGosterilsinMi = document.getElementById("tipli_iliski_kutusu").checked;
+
+            let kenarlar = ortakKavramKenarlari;
+
+            if (tipliIliskiGosterilsinMi) {
+                const tipliIliskiKenarlari = veri.sayfa_iliskileri.map(function(iliski) {
+                    return {
+                        from: iliski.kaynak_sayfa_id,
+                        to: iliski.hedef_sayfa_id,
+                        label: iliski.iliski_tipi,
+                        arrows: "to",
+                        color: "#0077B6",
+                        title: iliski.kaynak_kavram_ismi + " -> " + iliski.hedef_kavram_ismi
+                    };
+                });
+                kenarlar = ortakKavramKenarlari.concat(tipliIliskiKenarlari);
+            }
 
             grafiCiz(dugumler, kenarlar);
         }

@@ -180,8 +180,8 @@ async def tum_sayfalari_yeniden_isle():
 
     print("\nTum sayfalar islendi. Global graf yeniden hesaplaniyor...")
     async with SessionYerel() as db:
-        olusturulan_baglanti = await global_graf_yeniden_hesapla(db)
-    print(f"Global graf yeniden kuruldu: {olusturulan_baglanti} baglanti olusturuldu.")
+        olusturulan_baglanti, olusturulan_iliski = await global_graf_yeniden_hesapla(db)
+    print(f"Global graf yeniden kuruldu: {olusturulan_baglanti} baglanti, {olusturulan_iliski} tipli iliski olusturuldu.")
 
     if basarisiz_sayfalar:
         print(f"\n{len(basarisiz_sayfalar)} sayfa basarisiz oldu:")
