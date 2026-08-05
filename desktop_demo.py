@@ -714,10 +714,20 @@ class SayfalarSekmesi(QWidget):
     Bir sayfaya CIFT TIKLAYINCA (ya da "Detay Ac" ile) SayfaDetayDialogu
     acilir - orada PUT /pages/{id}/kategori, POST /pages/{id}/classify
     ve POST /pages/{id}/extract-concepts var.
+
+    SURUKLE-BIRAK: bu sekmenin uzerine dosya sistiminden (orn. masaustu)
+    bir ya da birden fazla PDF surukleyip birakmak, "PDF Yukle"
+    butonundaki dosya secme penceresine gitmeden AYNI yukleme akisini
+    tetikler (bkz. dragEnterEvent/dropEvent).
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # Surukle-birak'i ETKINLESTIR - Qt varsayilan olarak widget'lara
+        # dropEvent GONDERMEZ, setAcceptDrops(True) olmadan hicbir sey
+        # olmaz.
+        self.setAcceptDrops(True)
 
         self.sayfa_listesi = QListWidget()
         # Cift tiklama ile de detay penceresi acilsin - "Detay Ac"
@@ -854,14 +864,25 @@ class SayfalarSekmesi(QWidget):
         """
         QFileDialog.getOpenFileName: isletim sisteminin KENDI dosya
         secme penceresini acar (Windows Gezgini gibi). Kullanici bir
-        PDF secince, dosyayi POST /sources/pdf'e MULTIPART FORM olarak
-        (dosya icerigiyle birlikte) yolluyoruz.
+        PDF secince, asil yukleme islemini _pdf_dosyasini_yukle'ye
+        birakiyoruz - surukle-birak (dropEvent) ile AYNI kod yolu.
         """
         dosya_yolu, _ = QFileDialog.getOpenFileName(self, "PDF Sec", "", "PDF Dosyalari (*.pdf)")
         if not dosya_yolu:
             return  # kullanici pencereyi iptal etti
 
-        self.durum_etiketi.setText("Yukleniyor (buyuk PDF'lerde biraz surebilir)...")
+        self._pdf_dosyasini_yukle(dosya_yolu)
+
+    def _pdf_dosyasini_yukle(self, dosya_yolu: str):
+        """
+        Verilen dosya yolundaki PDF'i POST /sources/pdf'e MULTIPART
+        FORM olarak yukler. Hem "PDF Yukle" butonu (dosya secme
+        penceresi ile) HEM surukle-birak (dropEvent ile) BU fonksiyonu
+        PAYLASIR - ikisi de AYNI yukleme mantigini kullanir.
+        """
+        self.durum_etiketi.setText(
+            f"Yukleniyor ({os.path.basename(dosya_yolu)}, buyuk PDF'lerde biraz surebilir)..."
+        )
         QApplication.processEvents()
 
         try:
@@ -879,13 +900,48 @@ class SayfalarSekmesi(QWidget):
             yanit.raise_for_status()
         except requests.exceptions.ConnectionError:
             self.durum_etiketi.setText("Backend'e baglanilamadi")
-            return
+            return False
         except requests.exceptions.RequestException as hata:
             self.durum_etiketi.setText(f"Hata: {http_hata_mesaji(hata)}")
+            return False
+
+        self.durum_etiketi.setText(f"'{os.path.basename(dosya_yolu)}' basariyla yuklendi")
+        self.sayfalari_yukle()
+        return True
+
+    def dragEnterEvent(self, event):
+        """
+        Suruklenen seyin uzerine gelince (henuz BIRAKILMADAN) cagrilir -
+        ICERIGINE bakip (en az bir yerel .pdf dosyasi var mi) kabul
+        edip ETMEYECEGIMIZE karar veriyoruz. Kabul etmezsek Qt hicbir
+        gorsel geri bildirim (yesil + isareti gibi) GOSTERMEZ ve
+        dropEvent hic tetiklenmez.
+        """
+        if event.mimeData().hasUrls() and any(
+            url.toLocalFile().lower().endswith(".pdf") for url in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """
+        Dosyalar BIRAKILINCA cagrilir - surukle-birak ile gelen HER
+        .pdf dosyasini, tek tek dosya secme penceresinden secilmis gibi
+        _pdf_dosyasini_yukle ile yukler. PDF olmayan dosyalar (orn.
+        yanlislikla bir .docx suruklenmisse) sessizce atlanir.
+        """
+        pdf_yollari = [
+            url.toLocalFile() for url in event.mimeData().urls()
+            if url.toLocalFile().lower().endswith(".pdf")
+        ]
+
+        if not pdf_yollari:
+            self.durum_etiketi.setText("Sadece PDF dosyalari desteklenir")
             return
 
-        self.durum_etiketi.setText("PDF basariyla yuklendi")
-        self.sayfalari_yukle()
+        for dosya_yolu in pdf_yollari:
+            self._pdf_dosyasini_yukle(dosya_yolu)
+
+        event.acceptProposedAction()
 
 
 class KategorilerSekmesi(QWidget):
