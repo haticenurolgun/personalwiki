@@ -32,35 +32,57 @@ DOGRUDAN_KAVRAM_UZAKLIGI = 0.0
 # Iliskili kavramlar ARTIK TEK bir sabit degil, ILISKI TIPINE gore
 # farkli agirliklar aliyor - onceden tum 8 tip (ONKOSUL de ILGILI de)
 # ayni 0.15 degerini kullaniyordu, yani "iliskili mi degil mi" disinda
-# hicbir ayrim yapilmiyordu. Siralama, RAG baglaminda ne kadar
-# DOGRUDAN faydali oldugu sezgisine dayanir:
+# hicbir ayrim yapilmiyordu.
+#
+# KALIBRASYON (gercek veriyle test edilerek yapildi, bkz. proje
+# notlari): ilk denemede TUM degerler (0.10-0.30) "tipik embedding
+# sonucundan kucuk" varsayimiyla secilmisti, ama gercek sorgularda
+# (orn. "FastAPI") bu projenin embedding modelinin GERCEKTEN alakali
+# sonuclar icin bile ~0.40'in ALTINA pek inmedigi ortaya cikti. Bu
+# yuzden ILK halinde TUM iliski tipleri (en zayifi ILGILI dahil) HER
+# ZAMAN butun embedding sonuclarini yeniyordu - orn. "Proje lideri
+# Ahmet Yilmaz, XYZ Teknoloji bunyesinde calismaktadir" (BAHSEDER,
+# FastAPI'den hic bahsetmeyen bir cumle) FastAPI'nin GERCEK tanimini
+# (embedding, 0.427) geride birakiyordu. Duzeltme: BAHSEDER/ILGILI
+# artik BILINCLI OLARAK gercek embedding tabaninin (~0.40) UZERINDE -
+# boylece sadece GERCEKTEN daha iyi bir embedding sonucu yoksa devreye
+# giriyorlar. ONKOSUL/PARCASI/ICERIR ise DUSUK birakildi (BILINCLI
+# TERCIH, hata degil) - bunlarin amaci zaten embedding'in
+# YAKALAYAMAYACAGI (farkli kelime dagarciciyla ifade edilmis) temel/
+# hiyerarsik baglami ONE CIKARMAK, o yuzden embedding sonuclarini
+# geride birakmalari ISTENEN davranis.
 #   - ONKOSUL/PARCASI/ICERIR: yapisal/hiyerarsik, en guclu sinyal -
 #     "2NF" ararken "1NF"nin de cikmasi neredeyse her zaman faydali.
-#   - AITTIR/KULLANIR: anlamli ama daha az hiyerarsik.
-#   - BAHSEDER/KAYNAKLANIR: referans niteliginde, daha zayif - bir
-#     dosyanin bir kavramdan BAHSETMESI, o kavramin ASIL konusu
-#     oldugu anlamina gelmez.
+#     BILINCLI OLARAK embedding tabaninin ALTINDA tutuluyor.
+#   - AITTIR/KULLANIR/KAYNAKLANIR: anlamli ama daha az hiyerarsik -
+#     gercek ornekler (orn. "FastAPI -KAYNAKLANIR-> Python") beklenenden
+#     daha faydali ciktigi icin KAYNAKLANIR bu kalibrasyonda
+#     BAHSEDER'den ayrilip bu guclu gruba tasindi.
+#   - BAHSEDER: referans niteliginde ama gercek veride SIK SIK zayif/
+#     totolojik ciktigi gozlemlendi (orn. "randevu al -> randevu") -
+#     embedding tabaninin UZERINE cikarildi.
 #   - ILGILI: hicbir spesifik tip uymadiginda kullanilan SON CARE
-#     etiketi - en zayif sinyal.
-# Degerler kalibre EDILMEDI (gercek kullanimla ayarlanabilir), ama
-# hepsi DOGRUDAN_KAVRAM_UZAKLIGI'ndan (0.0) buyuk, cogu gercek
-# embedding sonucundan (genelde >0.3-0.4) kucuk kalacak sekilde secildi.
+#     etiketi - en zayif sinyal, embedding tabaninin da UZERINDE.
 ILISKI_TIPI_UZAKLIGI = {
     "ONKOSUL": 0.10,
     "PARCASI": 0.12,
     "ICERIR": 0.12,
+    "KAYNAKLANIR": 0.18,
     "AITTIR": 0.18,
     "KULLANIR": 0.18,
-    "BAHSEDER": 0.24,
-    "KAYNAKLANIR": 0.24,
-    "ILGILI": 0.30,
+    "BAHSEDER": 0.45,
+    "ILGILI": 0.50,
 }
 
 # Ontology.py'deki ILISKI_TIPLERI listesinde OLMAYAN (normalde hic
-# olusmamasi gereken, ama savunmaci kod olarak) bir tip gelirse
-# kullanilacak varsayilan agirlik - ILISKI_TIPI_UZAKLIGI'nin ORTASI
-# civarinda, ne en iyimser ne en kotumser bir deger.
-ILISKI_TIPI_VARSAYILAN_UZAKLIK = 0.20
+# olusmamasi gereken - concepts.py::kavramlari_uygula, ontoloji disi
+# tipler icin zaten ConceptRelation OLUSTURMUYOR, bkz. OnerilenTur -
+# ama savunmaci kod olarak) bir tip gelirse kullanilacak varsayilan
+# agirlik. Kalibrasyon sonrasi iki net grup olustugu icin (guclu grup
+# 0.10-0.18, zayif grup 0.45-0.50) TAM ortasi anlamli degil - bilinmeyen
+# bir tipe KORKAK davranip zayif gruba yakin, ama embedding tabaninin
+# (~0.40) biraz altinda kalacak temkinli bir deger secildi.
+ILISKI_TIPI_VARSAYILAN_UZAKLIK = 0.30
 
 
 def _iliski_agirligi(iliski_tipi: str) -> float:
