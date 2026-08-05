@@ -137,6 +137,7 @@ class SayfaGrafiCevabi(BaseModel):
     
 class GlobalGrafYenidenHesaplaCevabi(BaseModel):
     olusturulan_baglanti_sayisi: int
+    olusturulan_iliski_sayisi: int
 
 
 class GlobalGrafSayfa(BaseModel):
@@ -150,6 +151,20 @@ class GlobalGrafBaglanti(BaseModel):
     ortak_kavram_ismi: str
 
 
+class GlobalGrafIliski(BaseModel):
+    """
+    SayfaIliskisi'ne karsilik gelir - GlobalGrafBaglanti'dan farkli
+    olarak YONLU ve TIPLI (ConceptRelation'a dayali) bir sayfa
+    baglantisi temsil eder.
+    """
+    kaynak_sayfa_id: int
+    hedef_sayfa_id: int
+    iliski_tipi: str
+    kaynak_kavram_ismi: str
+    hedef_kavram_ismi: str
+
+
 class GlobalGrafCevabi(BaseModel):
     sayfalar: list[GlobalGrafSayfa]
     baglantilar: list[GlobalGrafBaglanti]
+    sayfa_iliskileri: list[GlobalGrafIliski]

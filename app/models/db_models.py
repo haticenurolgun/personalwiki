@@ -292,8 +292,44 @@ class SayfaBaglantisi(Base):
 
     def __repr__(self):
         return f"<SayfaBaglantisi {self.sayfa_id_1}-{self.sayfa_id_2} kavram={self.ortak_kavram_ismi}>"
-    
-    
+
+
+class SayfaIliskisi(Base):
+    """
+    Katman 2'nin (global graph) SayfaBaglantisi'ndan FARKLI, DAHA
+    ZENGIN bir versiyonu: SayfaBaglantisi iki sayfanin sadece AYNI
+    kavrami paylastigini (yonsuz, tipsiz) gosterirken, bu tablo iki
+    sayfanin ConceptRelation uzerinden BAGLI (yonlu, tipli) kavramlar
+    icerdigini gosterir - orn. "A sayfasi, B sayfasindaki bir kavramin
+    ONKOSULU olan bir kavramdan bahsediyor" gibi.
+
+    Anlik hesaplanmaz - global_graf_yeniden_hesapla() cagrildiginda
+    SayfaBaglantisi ile BIRLIKTE tamamen silinip sifirdan yeniden
+    kurulur.
+    """
+
+    __tablename__ = "sayfa_iliskileri"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    kaynak_sayfa_id = Column(Integer, ForeignKey("wiki_pages.id"), nullable=False)
+    hedef_sayfa_id = Column(Integer, ForeignKey("wiki_pages.id"), nullable=False)
+
+    # ILISKI_TIPLERI listesinden biri (orn. "ONKOSUL") - hangi
+    # ConceptRelation'a dayandigini gosterir.
+    iliski_tipi = Column(String(50), nullable=False)
+
+    # Bu baglantiya sebep olan kavram cifti - kullaniciya "bu iki sayfa
+    # X, Y'nin ONKOSULU oldugu icin baglantili" diye gosterebilelim.
+    kaynak_kavram_ismi = Column(String(300), nullable=False)
+    hedef_kavram_ismi = Column(String(300), nullable=False)
+
+    olusturulma_tarihi = Column(DateTime, default=su_anki_zaman, nullable=False)
+
+    def __repr__(self):
+        return f"<SayfaIliskisi {self.kaynak_sayfa_id} -{self.iliski_tipi}-> {self.hedef_sayfa_id}>"
+
+
     
 class KavramGorulme(Base):
     """

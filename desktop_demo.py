@@ -804,11 +804,15 @@ class SayfalarSekmesi(QWidget):
 
 class GlobalGrafSekmesi(QWidget):
     """
-    "Global Graf" sekmesi: sayfalar arasi, ORTAK KAVRAMLAR uzerinden
-    kurulan baglanti haritasi (Katman 2) - GET /graph/global. Bu,
-    SayfaDetayDialogu'ndaki sayfa ICI grafikten (Katman 1) farkli -
-    orada tek bir sayfanin kavramlari/iliskileri var, burada FARKLI
-    sayfalarin ayni kavramdan gectigi icin birbirine baglanmasi var.
+    "Global Graf" sekmesi: sayfalar arasi baglanti haritasi (Katman 2) -
+    GET /graph/global. Bu, SayfaDetayDialogu'ndaki sayfa ICI grafikten
+    (Katman 1) farkli - orada tek bir sayfanin kavramlari/iliskileri
+    var, burada FARKLI sayfalarin birbirine baglanmasi var. Iki tur
+    baglanti gosterir:
+    - Yonsuz "ortak kavram" baglantilari (SayfaBaglantisi) - iki sayfa
+      AYNI kavramdan geciyor.
+    - Yonlu/tipli iliskiler (SayfaIliskisi) - iki sayfa, ConceptRelation
+      uzerinden BAGLI (orn. ONKOSUL) FARKLI kavramlar iceriyor.
 
     Onceden hesaplanmis veriyi gosterir - yeni kavram cikarimi
     yapildiktan sonra "Yeniden Hesapla"ya (POST /graph/global/yeniden-
@@ -859,18 +863,34 @@ class GlobalGrafSekmesi(QWidget):
         # icin once id->baslik eslemesi kuruyoruz.
         id_to_baslik = {sayfa["id"]: sayfa["title"] for sayfa in graf["sayfalar"]}
 
-        if not graf["baglantilar"]:
+        if not graf["baglantilar"] and not graf["sayfa_iliskileri"]:
             self.baglanti_listesi.addItem(QListWidgetItem("Henuz baglanti yok - 'Yeniden Hesapla'yi dene"))
-            self.durum_etiketi.setText("0 baglanti")
+            self.durum_etiketi.setText("0 baglanti, 0 iliski")
             return
 
+        # Once yonsuz "ortak kavram" baglantilari (SayfaBaglantisi)...
         for baglanti in graf["baglantilar"]:
             baslik_1 = id_to_baslik.get(baglanti["sayfa_id_1"], f"#{baglanti['sayfa_id_1']}")
             baslik_2 = id_to_baslik.get(baglanti["sayfa_id_2"], f"#{baglanti['sayfa_id_2']}")
             metin = f"{baslik_1}  ↔  {baslik_2}   (ortak kavram: {baglanti['ortak_kavram_ismi']})"
             self.baglanti_listesi.addItem(QListWidgetItem(metin))
 
-        self.durum_etiketi.setText(f"{len(graf['baglantilar'])} baglanti, {len(graf['sayfalar'])} sayfa")
+        # ...sonra YONLU/TIPLI iliskiler (SayfaIliskisi) - ConceptRelation'a
+        # dayali, hangi kavram ciftinin bu baglantiya sebep oldugunu da
+        # gosteriyor.
+        for iliski in graf["sayfa_iliskileri"]:
+            baslik_kaynak = id_to_baslik.get(iliski["kaynak_sayfa_id"], f"#{iliski['kaynak_sayfa_id']}")
+            baslik_hedef = id_to_baslik.get(iliski["hedef_sayfa_id"], f"#{iliski['hedef_sayfa_id']}")
+            metin = (
+                f"{baslik_kaynak}  -[{iliski['iliski_tipi']}]->  {baslik_hedef}   "
+                f"({iliski['kaynak_kavram_ismi']} -> {iliski['hedef_kavram_ismi']})"
+            )
+            self.baglanti_listesi.addItem(QListWidgetItem(metin))
+
+        self.durum_etiketi.setText(
+            f"{len(graf['baglantilar'])} baglanti, {len(graf['sayfa_iliskileri'])} iliski, "
+            f"{len(graf['sayfalar'])} sayfa"
+        )
 
     def yeniden_hesapla(self):
         """
