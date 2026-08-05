@@ -8,4 +8,11 @@ chroma_data/
 chroma_data_test/
 *.db
 .idea/
-.claude/settings.local.json 
+.claude/settings.local.json
+
+# PyInstaller build ciktilari (desktop_demo.py'den .exe uretirken
+# olusuyor) - PersonalWikiAI.spec build AYARLARINI tuttugu icin
+# BILINCLI OLARAK gitignore'a EKLENMEDI, tekrar uretilebilir build
+# icin saklaniyor.
+build/
+dist/ 
