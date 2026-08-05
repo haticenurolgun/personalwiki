@@ -443,7 +443,34 @@
             });
         }
 
-        window.onload = grafiGetir;
+        // Masaustu uygulamasindan (desktop_demo.py) "Gorsel Grafigi Ac"
+        // butonuyla DOGRUDAN dogru moda/sayfaya acilabilmesi icin URL
+        // parametrelerini oku - orn. ?mod=sayfa&sayfa_id=5 ya da
+        // ?mod=global&tipli=1. Parametre yoksa mevcut varsayilanlar
+        // (mod=sayfa, sayfa_id=1) degismeden kalir.
+        function urlParametrelerinden_baslangic_durumunu_uygula() {
+            const parametreler = new URLSearchParams(window.location.search);
+
+            const mod = parametreler.get("mod");
+            if (mod === "sayfa" || mod === "global") {
+                document.getElementById("mod_secici").value = mod;
+                modDegisti();
+            }
+
+            const sayfaId = parametreler.get("sayfa_id");
+            if (sayfaId) {
+                document.getElementById("sayfa_id_girdisi").value = sayfaId;
+            }
+
+            if (parametreler.get("tipli") === "1") {
+                document.getElementById("tipli_iliski_kutusu").checked = true;
+            }
+        }
+
+        window.onload = function() {
+            urlParametrelerinden_baslangic_durumunu_uygula();
+            grafiGetir();
+        };
     </script>
 </body>
 </html>

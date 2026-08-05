@@ -17,6 +17,7 @@ Calistirmak icin (venv aktifken, ayri bir terminalde):
 import html
 import os
 import sys
+import webbrowser
 
 import requests
 from PyQt6.QtCore import Qt
@@ -281,6 +282,17 @@ class SayfaDetayDialogu(QDialog):
         self.grafik_yenile_butonu = QPushButton("Grafigi Yenile")
         self.grafik_yenile_butonu.clicked.connect(self.grafigi_yukle)
 
+        # graph.html'deki gorsel (renkli, etkilesimli) graf goruntuleyiciyi
+        # sistemin varsayilan tarayicisinda, DOGRUDAN bu sayfanin Katman 1
+        # goruntusune ac - grafik_listesi'ndeki duz metin listesinin
+        # gorsel karsiligi.
+        self.gorsel_graf_butonu = QPushButton("Gorsel Grafigi Ac (Tarayicida)")
+        self.gorsel_graf_butonu.clicked.connect(self.gorsel_grafigi_ac)
+
+        grafik_buton_satiri = QHBoxLayout()
+        grafik_buton_satiri.addWidget(self.grafik_yenile_butonu)
+        grafik_buton_satiri.addWidget(self.gorsel_graf_butonu)
+
         self.grafik_listesi = QListWidget()
 
         self.durum_etiketi = QLabel("")
@@ -295,7 +307,7 @@ class SayfaDetayDialogu(QDialog):
         layout.addWidget(self.yeniden_isle_butonu)
         layout.addWidget(QLabel("Kavram Grafigi:"))
         layout.addWidget(self.grafik_listesi)
-        layout.addWidget(self.grafik_yenile_butonu)
+        layout.addLayout(grafik_buton_satiri)
         layout.addWidget(self.durum_etiketi)
         self.setLayout(layout)
 
@@ -436,6 +448,16 @@ class SayfaDetayDialogu(QDialog):
             self.grafik_listesi.addItem(
                 QListWidgetItem(f"   {kaynak_isim} —[{iliski['iliski_tipi']}]→ {hedef_isim}")
             )
+
+    def gorsel_grafigi_ac(self):
+        """
+        graph.html'i (renkli, etkilesimli vis-network goruntuleyici) bu
+        sayfanin Katman 1 grafigine DOGRUDAN acilacak sekilde sistemin
+        varsayilan tarayicisinda acar - URL parametreleri (mod, sayfa_id)
+        graph.html'in kendi baslangic-durumu okuma mantigi tarafindan
+        okunuyor.
+        """
+        webbrowser.open(f"{BACKEND_URL}/static/graph.html?mod=sayfa&sayfa_id={self.sayfa_id}")
 
 
 class SohbetSekmesi(QWidget):
@@ -964,6 +986,13 @@ class GlobalGrafSekmesi(QWidget):
         self.yeniden_hesapla_butonu = QPushButton("Yeniden Hesapla")
         self.yeniden_hesapla_butonu.clicked.connect(self.yeniden_hesapla)
 
+        # graph.html'deki gorsel (renkli, etkilesimli) graf goruntuleyiciyi
+        # sistemin varsayilan tarayicisinda, DOGRUDAN Katman 2 (global)
+        # goruntusune ac - baglanti_listesi'ndeki duz metin listesinin
+        # gorsel karsiligi.
+        self.gorsel_graf_butonu = QPushButton("Gorsel Grafigi Ac (Tarayicida)")
+        self.gorsel_graf_butonu.clicked.connect(self.gorsel_grafigi_ac)
+
         self.baglanti_listesi = QListWidget()
 
         self.durum_etiketi = QLabel("Baglantilari gormek icin 'Yenile'ye bas")
@@ -971,6 +1000,7 @@ class GlobalGrafSekmesi(QWidget):
         ust_satir = QHBoxLayout()
         ust_satir.addWidget(self.yenile_butonu)
         ust_satir.addWidget(self.yeniden_hesapla_butonu)
+        ust_satir.addWidget(self.gorsel_graf_butonu)
 
         layout = QVBoxLayout()
         layout.addLayout(ust_satir)
@@ -1049,6 +1079,14 @@ class GlobalGrafSekmesi(QWidget):
             return
 
         self.grafigi_yukle()
+
+    def gorsel_grafigi_ac(self):
+        """
+        graph.html'i (renkli, etkilesimli vis-network goruntuleyici)
+        DOGRUDAN Katman 2 (global) goruntusune acilacak sekilde
+        sistemin varsayilan tarayicisinda acar.
+        """
+        webbrowser.open(f"{BACKEND_URL}/static/graph.html?mod=global")
 
 
 class AnaPencere(QMainWindow):
