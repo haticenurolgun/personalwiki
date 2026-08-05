@@ -5,42 +5,246 @@
     <title>PersonalWiki - Kavram Grafigi Goruntuleyici</title>
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 20px; }
-        #graf { width: 100%; height: 600px; border: 1px solid #ccc; margin-top: 10px; }
-        input, button, select { padding: 8px; font-size: 14px; }
-        button { cursor: pointer; }
-        #hata_mesaji { color: red; margin-top: 10px; }
-        #sayfa_id_alani { display: inline; }
+        /*
+         * Renk sistemi iki katmandan olusuyor:
+         * 1) UYGULAMA KROMU (arka plan, butonlar, basliklar) - desktop_demo.py'deki
+         *    "deniz mavisi" temasiyla AYNI degerler, boylece web arayuzu ile
+         *    masaustu uygulamasi tutarli gorunuyor.
+         * 2) VERI RENKLERI (--series-1..10) - kategorik, SABIT SIRALI bir palet.
+         *    Kavram tiplerini (Katman 1) ve kenar turlerini (Katman 2) ayirt
+         *    etmek icin kullaniliyor. Ilk 8 renk, colorblind-guvenli olacak
+         *    sekilde DOGRULANMIS bir sirada (bkz. proje notlari) - hicbir zaman
+         *    rastgele/dongusel atanmiyor. KAVRAM_TIPLERI 10 tip icerdigi icin
+         *    (validasyonu kapsamayan) 2 ek renk daha eklendi - bu ikisi sadece
+         *    GORSEL OLARAK ayirt edilebilir olması icin secildi, siki CVD
+         *    testinden gecmedi (agac/dugum grafiginde ayni anda TUM 10 tipin
+         *    yan yana gorulmesi olası degil, bu yuzden kabul edilebilir bir
+         *    esneme).
+         */
+        :root {
+            color-scheme: light;
+            --surface-1:      #fcfcfb;
+            --page-plane:     #CAF0F8;
+            --text-primary:   #03045E;
+            --text-secondary: #52514e;
+            --muted:          #898781;
+            --hairline:       #e1e0d9;
+            --border-ring:    rgba(11, 11, 11, 0.10);
+            --accent:         #0077B6;
+            --accent-strong:  #023E8A;
+            --card-bg:        #ffffff;
+
+            --series-1:  #2a78d6; /* mavi */
+            --series-2:  #eb6834; /* turuncu */
+            --series-3:  #1baf7a; /* deniz yesili */
+            --series-4:  #eda100; /* sari */
+            --series-5:  #e87ba4; /* magenta */
+            --series-6:  #008300; /* yesil */
+            --series-7:  #4a3aa7; /* mor */
+            --series-8:  #e34948; /* kirmizi */
+            --series-9:  #8a5a2b; /* kahverengi (ek) */
+            --series-10: #5c6bc0; /* indigo (ek) */
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                color-scheme: dark;
+                --surface-1:      #1a1a19;
+                --page-plane:     #0d1b2a;
+                --text-primary:   #e8f7fc;
+                --text-secondary: #c3c2b7;
+                --muted:          #8a9296;
+                --hairline:       #2c2c2a;
+                --border-ring:    rgba(255, 255, 255, 0.12);
+                --accent:         #3987e5;
+                --accent-strong:  #90E0EF;
+                --card-bg:        #14212b;
+
+                --series-1:  #3987e5;
+                --series-2:  #d95926;
+                --series-3:  #199e70;
+                --series-4:  #c98500;
+                --series-5:  #d55181;
+                --series-6:  #2fae2f;
+                --series-7:  #9085e9;
+                --series-8:  #e66767;
+                --series-9:  #b98a5a;
+                --series-10: #8c9eff;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 24px;
+            background: var(--page-plane);
+            color: var(--text-primary);
+        }
+
+        h2 {
+            margin: 0 0 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .kontrol_paneli {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 14px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-ring);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+        }
+
+        label { font-weight: 600; color: var(--text-secondary); font-size: 14px; }
+
+        input, select {
+            padding: 7px 10px;
+            font-size: 14px;
+            border: 1px solid var(--hairline);
+            border-radius: 6px;
+            background: var(--surface-1);
+            color: var(--text-primary);
+        }
+
+        input[type="checkbox"] { width: 16px; height: 16px; }
+
+        button {
+            cursor: pointer;
+            padding: 8px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            background: var(--accent);
+            color: white;
+            transition: background 0.15s ease;
+        }
+        button:hover { background: var(--accent-strong); }
+
+        #hata_mesaji {
+            color: #e34948;
+            font-weight: 600;
+            margin-bottom: 10px;
+            min-height: 1.2em;
+        }
+
+        .graf_karti {
+            background: var(--surface-1);
+            border: 1px solid var(--border-ring);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #graf { width: 100%; height: 600px; }
+
+        #lejant {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 18px;
+            padding: 12px 16px;
+            border-top: 1px solid var(--hairline);
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .lejant_ogesi { display: flex; align-items: center; gap: 6px; }
+
+        .lejant_nokta {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .lejant_cizgi {
+            width: 18px;
+            height: 3px;
+            border-radius: 2px;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        #secili_dugum_bilgisi {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-ring);
+            border-radius: 10px;
+            min-height: 20px;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
     </style>
 </head>
 <body>
     <h2>Kavram Grafigi Goruntuleyici</h2>
 
-    <label for="mod_secici">Gorunum:</label>
-    <select id="mod_secici" onchange="modDegisti()">
-        <option value="sayfa">Katman 1: Sayfa Ici</option>
-        <option value="global">Katman 2: Global (Sayfalar Arasi)</option>
-    </select>
+    <div class="kontrol_paneli">
+        <label for="mod_secici">Gorunum:</label>
+        <select id="mod_secici" onchange="modDegisti()">
+            <option value="sayfa">Katman 1: Sayfa Ici</option>
+            <option value="global">Katman 2: Global (Sayfalar Arasi)</option>
+        </select>
 
-    <span id="sayfa_id_alani">
-        <label for="sayfa_id_girdisi">Sayfa ID:</label>
-        <input type="number" id="sayfa_id_girdisi" value="1" min="1">
-    </span>
+        <span id="sayfa_id_alani">
+            <label for="sayfa_id_girdisi">Sayfa ID:</label>
+            <input type="number" id="sayfa_id_girdisi" value="1" min="1">
+        </span>
 
-    <span id="tipli_iliski_alani" style="display: none;">
-        <label>
-            <input type="checkbox" id="tipli_iliski_kutusu" onchange="grafiGetir()">
-            Tipli iliskileri de goster (ONKOSUL, KULLANIR, ...)
-        </label>
-    </span>
+        <span id="tipli_iliski_alani" style="display: none;">
+            <label>
+                <input type="checkbox" id="tipli_iliski_kutusu" onchange="grafiGetir()">
+                Tipli iliskileri de goster (ONKOSUL, KULLANIR, ...)
+            </label>
+        </span>
 
-    <button onclick="grafiGetir()">Getir</button>
+        <button onclick="grafiGetir()">Getir</button>
+    </div>
 
     <div id="hata_mesaji"></div>
-    <div id="graf"></div>
-    <div id="secili_dugum_bilgisi" style="margin-top: 10px; padding: 10px; background: #f5f5f5; min-height: 20px;"></div>
+
+    <div class="graf_karti">
+        <div id="graf"></div>
+        <div id="lejant"></div>
+    </div>
+
+    <div id="secili_dugum_bilgisi">Bir dugume tiklayarak detayini gorebilirsin.</div>
 
     <script>
+        // CSS degiskenlerini (--series-N) canvas'a (vis-network) verebilmek
+        // icin GERCEK renk degerine ceviriyoruz - canvas context'i CSS
+        // var()'i anlamiyor, bu yuzden getComputedStyle ile okunmasi lazim.
+        function renkAl(degisken) {
+            return getComputedStyle(document.documentElement).getPropertyValue(degisken).trim();
+        }
+
+        // KAVRAM_TIPLERI (ontology.py) ile AYNI sirada, SABIT (asla
+        // dongusel/rastgele atanmayan) bir kategorik renk eslemesi.
+        const KAVRAM_TIPI_SERI_DEGISKENI = {
+            "KONU":         "--series-1",
+            "TERIM":        "--series-2",
+            "DOSYA":        "--series-3",
+            "KISI":         "--series-4",
+            "PROJE":        "--series-5",
+            "ARAC":         "--series-6",
+            "TARIH_OLAYI":  "--series-7",
+            "KURUM":        "--series-8",
+            "KAYNAK":       "--series-9",
+            "GOREV":        "--series-10",
+        };
+
+        function kavramTipiRengi(tip) {
+            const degisken = KAVRAM_TIPI_SERI_DEGISKENI[tip];
+            return degisken ? renkAl(degisken) : renkAl("--muted");
+        }
+
         function modDegisti() {
             const mod = document.getElementById("mod_secici").value;
             const sayfaIdAlani = document.getElementById("sayfa_id_alani");
@@ -94,7 +298,12 @@
                 return {
                     id: kavram.id,
                     label: kavram.standart_isim,
-                    group: kavram.tip,
+                    color: {
+                        background: kavramTipiRengi(kavram.tip),
+                        border: renkAl("--text-primary"),
+                        highlight: { background: kavramTipiRengi(kavram.tip), border: renkAl("--accent-strong") }
+                    },
+                    font: { color: renkAl("--text-primary") },
                     title: "Tur: " + kavram.tip
                 };
             });
@@ -104,44 +313,59 @@
                     from: iliski.kaynak_id,
                     to: iliski.hedef_id,
                     label: iliski.iliski_tipi,
-                    arrows: "to"
+                    arrows: "to",
+                    color: { color: renkAl("--muted"), highlight: renkAl("--accent") }
                 };
             });
+
+            // Lejant: SADECE bu grafta gercekten gorulen kavram tiplerini
+            // goster - kullanilmayan 10 tipi listelemek gereksiz gurultu olur.
+            const gorulenTipler = [...new Set(veri.kavramlar.map(k => k.tip))].sort();
+            lejantiCiz(gorulenTipler.map(tip => ({ renk: kavramTipiRengi(tip), etiket: tip, sekil: "nokta" })));
 
             grafiCiz(dugumler, kenarlar);
         }
 
         function grafiCizGlobalModu(veri) {
+            const sayfaRengi = renkAl("--series-1");
+
             const dugumler = veri.sayfalar.map(function(sayfa) {
                 return {
                     id: sayfa.id,
                     label: sayfa.title,
                     shape: "box",
-                    color: "#FFD700",
+                    color: {
+                        background: sayfaRengi,
+                        border: renkAl("--accent-strong"),
+                        highlight: { background: sayfaRengi, border: renkAl("--text-primary") }
+                    },
+                    font: { color: "#ffffff" },
                     title: "Sayfa ID: " + sayfa.id
                 };
             });
 
-            // Yonsuz "ortak kavram" baglantilari (SayfaBaglantisi) - gri,
-            // oksuz cizgi.
+            const ortakKavramRengi = renkAl("--muted");
+            const tipliIliskiRengi = renkAl("--series-2");
+
+            // Yonsuz "ortak kavram" baglantilari (SayfaBaglantisi).
             const ortakKavramKenarlari = veri.baglantilar.map(function(baglanti) {
                 return {
                     from: baglanti.sayfa_id_1,
                     to: baglanti.sayfa_id_2,
                     label: baglanti.ortak_kavram_ismi,
                     arrows: "",
-                    color: "#888"
+                    color: { color: ortakKavramRengi, highlight: renkAl("--accent") }
                 };
             });
 
             // Yonlu/tipli iliskiler (SayfaIliskisi) - ConceptRelation'a
-            // dayali, ok'lu ve FARKLI renkte (mavi). VARSAYILAN OLARAK
-            // KAPALI - ortak kavram baglantilarinin uzerine binince
-            // graf hizla okunmaz hale geliyor (cok fazla capraz kenar).
-            // Kullanici isterse kutucugu isaretleyip acabilir.
+            // dayali. VARSAYILAN OLARAK KAPALI - ortak kavram
+            // baglantilarinin uzerine binince graf hizla okunmaz hale
+            // geliyor. Kullanici isterse kutucugu isaretleyip acabilir.
             const tipliIliskiGosterilsinMi = document.getElementById("tipli_iliski_kutusu").checked;
 
             let kenarlar = ortakKavramKenarlari;
+            const lejantOgeleri = [{ renk: ortakKavramRengi, etiket: "Ortak kavram", sekil: "cizgi" }];
 
             if (tipliIliskiGosterilsinMi) {
                 const tipliIliskiKenarlari = veri.sayfa_iliskileri.map(function(iliski) {
@@ -150,14 +374,37 @@
                         to: iliski.hedef_sayfa_id,
                         label: iliski.iliski_tipi,
                         arrows: "to",
-                        color: "#0077B6",
+                        color: { color: tipliIliskiRengi, highlight: renkAl("--accent") },
                         title: iliski.kaynak_kavram_ismi + " -> " + iliski.hedef_kavram_ismi
                     };
                 });
                 kenarlar = ortakKavramKenarlari.concat(tipliIliskiKenarlari);
+                lejantOgeleri.push({ renk: tipliIliskiRengi, etiket: "Tipli iliski (ConceptRelation)", sekil: "cizgi" });
             }
 
+            lejantiCiz(lejantOgeleri);
             grafiCiz(dugumler, kenarlar);
+        }
+
+        function lejantiCiz(ogeler) {
+            const lejantDiv = document.getElementById("lejant");
+            lejantDiv.innerHTML = "";
+
+            for (const oge of ogeler) {
+                const satir = document.createElement("span");
+                satir.className = "lejant_ogesi";
+
+                const isaret = document.createElement("span");
+                isaret.className = oge.sekil === "cizgi" ? "lejant_cizgi" : "lejant_nokta";
+                isaret.style.background = oge.renk;
+
+                const etiket = document.createElement("span");
+                etiket.textContent = oge.etiket;
+
+                satir.appendChild(isaret);
+                satir.appendChild(etiket);
+                lejantDiv.appendChild(satir);
+            }
         }
 
         function grafiCiz(dugumler, kenarlar) {
@@ -167,9 +414,19 @@
                 edges: new vis.DataSet(kenarlar)
             };
             const secenekler = {
-                nodes: { shape: "dot", size: 16 },
-                edges: { font: { size: 10 }, color: "#888" },
-                physics: { stabilization: true }
+                nodes: {
+                    shape: "dot",
+                    size: 16,
+                    borderWidth: 2,
+                    font: { size: 13, face: "system-ui, -apple-system, Segoe UI, sans-serif" }
+                },
+                edges: {
+                    width: 1.5,
+                    font: { size: 10, color: renkAl("--text-secondary"), strokeWidth: 0 },
+                    smooth: { type: "continuous" }
+                },
+                physics: { stabilization: true },
+                interaction: { hover: true }
             };
 
             const network = new vis.Network(container, grafVerisi, secenekler);
@@ -181,7 +438,7 @@
                     const secilenDugum = grafVerisi.nodes.get(secilenId);
                     bilgiDiv.innerHTML = secilenDugum.title || secilenDugum.label;
                 } else {
-                    bilgiDiv.innerHTML = "";
+                    bilgiDiv.innerHTML = "Bir dugume tiklayarak detayini gorebilirsin.";
                 }
             });
         }
