@@ -5,6 +5,8 @@
 
 from pydantic_settings import BaseSettings
 
+from app.uygulama_yollari import yol
+
 
 class Ayarlar(BaseSettings):
     """
@@ -16,7 +18,10 @@ class Ayarlar(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.5-flash"   # varsayilan deger
 
     class Config:
-        env_file = ".env" #değerleri bu dosyadan çek demek.
+        # yol(".env"): CWD'ye degil, uygulamanin TABAN dizinine gore
+        # (bkz. uygulama_yollari.py) - PyInstaller ile paketlenmis exe
+        # nereden calistirilirsa calistirilsin AYNI .env'i bulsun diye.
+        env_file = yol(".env")
         
 
 

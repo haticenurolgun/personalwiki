@@ -3,8 +3,15 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.models.db_models import Base
+from app.uygulama_yollari import yol
 
-VERITABANI_URL = "sqlite+aiosqlite:///./personalwiki.db"
+# yol("personalwiki.db"): CWD'ye gore "./personalwiki.db" DEGIL,
+# uygulamanin TABAN dizinine gore MUTLAK bir yol (bkz.
+# uygulama_yollari.py) - PyInstaller ile paketlenmis exe nereden
+# calistirilirsa calistirilsin AYNI veritabanini bulsun diye. SQLite
+# URL'i icin ters slash'lar (\) ileri slash'a (/) cevriliyor - Windows
+# yollari SQLAlchemy'nin URL formatinda ters slash kabul etmiyor.
+VERITABANI_URL = f"sqlite+aiosqlite:///{yol('personalwiki.db').replace(chr(92), '/')}"
 
 
 # create_async_engine: veritabanina giden "baglanti havuzu"nu kurar.

@@ -18,6 +18,7 @@ from app.connectors.markdown_connector import markdown_metnini_cikar
 from app.services.chunking_secici import yontem_sec
 from app.routers.pages import siniflandirmayi_uygula
 from app.routers.concepts import kavramlari_uygula
+from app.uygulama_yollari import yol
 # prefix="/sources" -> bu router'daki her endpoint otomatik olarak
 # /sources ile baslar. tags=[...] ise sadece /docs sayfasinda
 # endpoint'lerin hangi baslik altinda gruplanacagini belirler.
@@ -96,8 +97,11 @@ async def markdown_ekle(istek: MarkdownEkle, db :AsyncSession = Depends(veritaba
 
     return yeni_sayfa
 
-# PDF dosyalarinin fiziksel olarak saklanacagi klasor
-YUKLEME_KLASORU = "app/uploads"
+# PDF dosyalarinin fiziksel olarak saklanacagi klasor - CWD'ye degil,
+# uygulamanin TABAN dizinine gore (bkz. uygulama_yollari.py) - exe
+# paketlenmis halde nereden calistirilirsa calistirilsin AYNI klasoru
+# bulsun diye.
+YUKLEME_KLASORU = yol("app", "uploads")
 
 
 @router.post("/pdf", response_model=WikipageCevap)

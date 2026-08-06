@@ -1499,7 +1499,7 @@ class AnaPencere(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PersonalWiki AI - Masaustu Demo")
+        self.setWindowTitle("Asistan")
         self.resize(750, 600)
 
         baslik_etiketi = QLabel("PersonalWiki AI")
