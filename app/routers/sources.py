@@ -138,7 +138,13 @@ async def pdf_ekle(
     if not ham_metin:
         raise HTTPException(
             status_code=422,
-            detail="PDF'ten metin cikarilamadi - dosya bos veya sadece goruntuden olusuyor olabilir (OCR gerektirebilir)"
+            detail=(
+                "PDF'ten metin cikarilamadi - dosya bos olabilir ya da "
+                "taranmis/goruntu tabanli bir sayfa icin OCR calismis "
+                "olabilir ama sistemde Tesseract OCR kurulu degil "
+                "(kurulum: winget install UB-Mannheim.TesseractOCR + "
+                "Turkce dil verisi tur.traineddata)"
+            ),
         )
 
     # 5) ICERIK TURUNE gore EN UYGUN chunking yontemini SEC ve
