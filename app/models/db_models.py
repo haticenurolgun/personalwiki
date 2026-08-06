@@ -61,6 +61,16 @@ class WikiPage(Base):
     created_at = Column(DateTime, default=su_anki_zaman, nullable=False)
     updated_at = Column(DateTime, default=su_anki_zaman, onupdate=su_anki_zaman, nullable=False)
 
+    # Kullanicinin bu sayfa icin belirledigi hatirlatma tarihi - yoksa
+    # None. hatirlatma_servisi.py periyodik olarak bu tarihi GECMIS
+    # (<=  simdi) VE hatirlatma_bildirildi_mi=False olan sayfalari
+    # tarayip Windows masaustu bildirimi gonderir, sonra bildirildi_mi'yi
+    # True yapar - boylece AYNI hatirlatma tekrar tekrar bildirilmez.
+    # Kullanici tarihi GUNCELLERSE (bkz. pages.py::hatirlatmayi_guncelle)
+    # bildirildi_mi tekrar False'a donuyor, ki yeni tarih de bildirilsin.
+    hatirlatma_tarihi = Column(DateTime, nullable=True)
+    hatirlatma_bildirildi_mi = Column(Boolean, default=False, nullable=False)
+
     def __repr__(self):
         # Bu fonksiyon sadece hata ayiklarken (debug) print ettigimizde
         # ekranda okunabilir bir cikti gormemizi sagliyor.
