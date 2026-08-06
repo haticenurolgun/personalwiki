@@ -14,6 +14,14 @@ tmp_ret = collect_all('pydantic')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pydantic_core')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# collect_all('torch'): pyinstaller-hooks-contrib'deki hook-torch.py
+# torch'un DLL'lerini zaten topluyor, ama bunu ACIKCA da cagirmak,
+# olasi eksik-toplama ihtimaline karsi bir GUVENLIK AGI - torch'un
+# TUM veri/binary/gizli-import'larinin PAKETE dahil oldugundan emin
+# oluyoruz. Asil DLL YUKLEME hatasi (shm.dll) icin asagidaki
+# runtime_hooks'a bkz.
+tmp_ret = collect_all('torch')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
@@ -24,7 +32,12 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    # pyi_rth_torch_dll.py: torch/lib/ altindaki DLL'lerin (orn.
+    # shm.dll) birbirini/bagimliliklarini BULABILMESI icin, uygulama
+    # baslarken _internal/ ve _internal/torch/lib/ klasorlerini
+    # Windows'un DLL arama yoluna ACIKCA ekler - bkz. o dosyadaki
+    # detayli aciklama.
+    runtime_hooks=['pyi_rth_torch_dll.py'],
     excludes=[],
     noarchive=False,
     optimize=0,
@@ -36,7 +49,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='PersonalWikiAI_Birlesik',
+    name='Asistan',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -55,5 +68,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='PersonalWikiAI_Birlesik',
+    name='Asistan',
 )

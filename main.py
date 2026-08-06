@@ -32,7 +32,7 @@ from app.routers import sources, pages, search, chat, concepts, graph, ontology,
 
 #fastapi oluşturuyoruz
 
-app = FastAPI(title="PersonelWiki",version= "0.1.0")
+app = FastAPI(title="Asistan",version= "0.1.0")
 
 # Statik dosyalar (graph.html) SALT-OKUNUR, degismeyen paket verisi -
 # PyInstaller ile paketlenmis (frozen) halde bunlar --add-data ile
