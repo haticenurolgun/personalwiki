@@ -1,11 +1,16 @@
-import os
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import chromadb
 
+from app.uygulama_yollari import yol
 
-BU_DOSYANIN_KLASORU = os.path.dirname(os.path.abspath(__file__))
-CHROMA_VERI_YOLU = os.path.join(BU_DOSYANIN_KLASORU, "..", "..", "chroma_data")
+# yol("chroma_data"): eskiden bu dosyanin __file__ konumuna gore
+# hesaplaniyordu - PyInstaller ile paketlenmis (frozen) halde __file__,
+# gecici bir cikartma klasorune (ve onefile modda calisma bitince
+# SILINEN bir yere) isaret eder, yani chroma_data degisiklikleri
+# KALICI OLMAZDI. Artik uygulamanin TABAN dizinine gore (bkz.
+# uygulama_yollari.py) - exe'nin KENDI bulundugu klasor - cozuluyor.
+CHROMA_VERI_YOLU = yol("chroma_data")
 
 
 # EmbeddingGemma, dogru embed kalitesi icin metnin GOREVINE gore farkli
