@@ -1,5 +1,6 @@
 #bu dosya veritabanına async bağlanmamızı sağlayan altyapıyı kurar
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.models.db_models import Base
 
@@ -29,7 +30,34 @@ async def veritabanini_hazirla():
     """
     async with engine.begin() as baglanti:
         await baglanti.run_sync(Base.metadata.create_all)
-        #Base.metadata.create_all "veritabanında olmayan tablo varsa oluştur" diyor. 
+        #Base.metadata.create_all "veritabanında olmayan tablo varsa oluştur" diyor.
+
+        # create_all SADECE eksik TABLOLARI olusturur, VAR OLAN bir
+        # tabloya SONRADAN eklenen SUTUNLARI eklemez. wiki_pages tablosu
+        # zaten mevcut kullanicilarda VARDI (hatirlatma ozelligi
+        # eklenmeden once) - o yuzden hatirlatma_tarihi/
+        # hatirlatma_bildirildi_mi sutunlari yoksa burada ELLE (basit
+        # bir ALTER TABLE ile) ekliyoruz. Alembic gibi tam bir migrasyon
+        # araci bu projede zaten kullanilmiyor, tek eksik sutun icin
+        # boyle bir bagimlilik eklemek yerine bu kucuk kontrol yeterli.
+        sutunlar = await baglanti.run_sync(
+            lambda sync_baglanti: [
+                satir[1] for satir in sync_baglanti.execute(
+                    text("PRAGMA table_info(wiki_pages)")
+                ).fetchall()
+            ]
+        )
+        if "hatirlatma_tarihi" not in sutunlar:
+            await baglanti.execute(
+                text("ALTER TABLE wiki_pages ADD COLUMN hatirlatma_tarihi DATETIME")
+            )
+        if "hatirlatma_bildirildi_mi" not in sutunlar:
+            await baglanti.execute(
+                text(
+                    "ALTER TABLE wiki_pages ADD COLUMN "
+                    "hatirlatma_bildirildi_mi BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
         
         
 async def veritabani_oturumu_getir():

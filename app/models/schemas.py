@@ -33,6 +33,7 @@ class WikipageCevap(BaseModel):
     tags: str | None
     kategori: str | None  # classifier.py'nin sectigi sabit kategori, yoksa None
     created_at: datetime  # sayfa ne zaman eklendi - "hatirlama" sorulari icin
+    hatirlatma_tarihi: datetime | None  # kullanicinin bu sayfa icin belirledigi hatirlatma tarihi, yoksa None
 
 
     class Config:
@@ -124,6 +125,16 @@ class IcerikGuncelle(BaseModel):
     guncelleme degildir).
     """
     content: str
+
+
+class HatirlatmaGuncelle(BaseModel):
+    """
+    PUT /pages/{id}/hatirlatma endpoint'ine gonderilmesi gereken govde.
+    tarih=None gonderilirse hatirlatma TAMAMEN KALDIRILIR (bir daha
+    bildirim gitmez). Saat dilimi (timezone) BELIRTILMEMISSE UTC
+    varsayilir - bkz. pages.py::hatirlatmayi_guncelle.
+    """
+    tarih: datetime | None = None
 
 
 

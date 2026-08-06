@@ -10,7 +10,9 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.schemas import WikipageCevap, IndexCevabi, SayfaGrafiCevabi, GraphKavram, GraphIliski, SiniflandirmaCevabi, KategoriGuncelle, IcerikGuncelle
+from datetime import timezone
+
+from app.models.schemas import WikipageCevap, IndexCevabi, SayfaGrafiCevabi, GraphKavram, GraphIliski, SiniflandirmaCevabi, KategoriGuncelle, IcerikGuncelle, HatirlatmaGuncelle
 from app.services.graph_servisi import sayfa_grafini_hesapla
 from app.services.classifier import sayfa_siniflandir
 from app.database import veritabani_oturumu_getir
@@ -350,6 +352,45 @@ async def kategoriyi_guncelle(
         raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
 
     sayfa.kategori = istek.kategori
+    await db.commit()
+    await db.refresh(sayfa)
+
+    return sayfa
+
+
+@router.put("/{sayfa_id}/hatirlatma", response_model=WikipageCevap)
+async def hatirlatmayi_guncelle(
+    sayfa_id: int,
+    istek: HatirlatmaGuncelle,
+    db: AsyncSession = Depends(veritabani_oturumu_getir),
+):
+    """
+    Bir sayfa icin hatirlatma tarihini ayarlar/degistirir/kaldirir.
+    tarih=None gonderilirse hatirlatma tamamen kaldirilir. hatirlatma_
+    servisi.py bu tarihi periyodik olarak tarayip zamani gelince
+    Windows masaustu bildirimi gonderiyor (bkz. o dosyanin notlari).
+
+    hatirlatma_bildirildi_mi HER ZAMAN False'a sifirlaniyor - kullanici
+    tarihi degistirdiginde (ornegin ileri bir tarihe erteledigi), eski
+    tarih icin ZATEN bildirilmis olsa bile, YENI tarih icin tekrar
+    bildirim gitmesi gerekir.
+    """
+    sonuc = await db.execute(select(WikiPage).where(WikiPage.id == sayfa_id))
+    sayfa = sonuc.scalars().first()
+
+    if sayfa is None:
+        raise HTTPException(status_code=404, detail="Sayfa bulunamadi")
+
+    tarih = istek.tarih
+    # Saat dilimi belirtilmemis (naive) bir tarih gelirse UTC varsayiyoruz -
+    # su_anki_zaman() (db_models.py) HER ZAMAN UTC-aware dondurdugu icin,
+    # hatirlatma_servisi.py'deki "tarih <= simdi" karsilastirmasinin
+    # dogru calismasi icin ikisinin de AYNI (UTC-aware) formatta olmasi sarttir.
+    if tarih is not None and tarih.tzinfo is None:
+        tarih = tarih.replace(tzinfo=timezone.utc)
+
+    sayfa.hatirlatma_tarihi = tarih
+    sayfa.hatirlatma_bildirildi_mi = False
     await db.commit()
     await db.refresh(sayfa)
 
